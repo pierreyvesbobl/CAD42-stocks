@@ -1,0 +1,3 @@
+- [Architecture et fonctionnalites](project_architecture.md) — Stack, pages, DB schema, API, composants de l'app CAD42-stocks
+- [Workflow n8n](project_n8n_workflow.md) — Pipeline d'import factures PDF > Gemini > matching > Supabase
+- [Changelog](project_changelog.md) — Historique des evolutions majeures du projet avec contexte
