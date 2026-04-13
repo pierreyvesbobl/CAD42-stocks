@@ -9,20 +9,26 @@ import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard,
   Package,
+  BoxIcon,
   Factory,
   FileCheck,
   ArrowLeftRight,
   ClipboardList,
+  Layers,
+  Settings,
   LogOut,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/catalogue', label: 'Catalogue', icon: Package },
+  { href: '/composants', label: 'Composants', icon: Package },
+  { href: '/produits-finis', label: 'Produits finis', icon: BoxIcon },
+  { href: '/nomenclatures', label: 'Nomenclatures', icon: Layers },
   { href: '/fabrication', label: 'Fabrication', icon: Factory },
   { href: '/validation', label: 'Validation', icon: FileCheck, badgeKey: 'validation' },
   { href: '/mouvements', label: 'Mouvements', icon: ArrowLeftRight },
   { href: '/inventaire', label: 'Inventaire', icon: ClipboardList },
+  { href: '/parametres', label: 'Parametres', icon: Settings },
 ]
 
 export function SidebarNav() {
@@ -74,7 +80,7 @@ export function SidebarNav() {
               <Icon className="h-4 w-4 shrink-0" />
               <span>{item.label}</span>
               {item.badgeKey === 'validation' && pendingCount > 0 && (
-                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-destructive-foreground">
+                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-semibold text-white">
                   {pendingCount}
                 </span>
               )}

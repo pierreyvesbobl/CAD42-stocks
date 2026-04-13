@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -13,6 +13,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -21,226 +24,764 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
+import { Search, Undo2, Factory, Wrench, Plus, Trash2, ArrowUp, ArrowDown, Settings2 } from 'lucide-react'
+import { ComposantModal } from '@/components/composant-modal'
 
-interface ProduitFini {
-  id: string
-  reference: string
-  nom: string
-}
+// ─── Types ───
 
-interface FabResult {
-  success: boolean
-  produit: string
-  quantite_fabriquee: number
-  composants_mis_a_jour: number
-  deficits: { nom: string; stock_apres: number }[]
-  alertes: { nom: string; stock_apres: number; seuil: number }[]
-  has_deficit: boolean
-  has_alerte: boolean
-  error?: string
-}
+interface ProduitFini { id: string; reference: string; nom: string }
+interface Operateur { id: string; nom: string; email: string | null }
 
 interface BomPreview {
-  composant_id: string
-  reference: string
-  nom: string
-  quantite_necessaire: number
-  stock_actuel: number
-  stock_apres: number
-  is_deficit: boolean
-  is_alerte: boolean
+  composant_id: string; reference: string; nom: string
+  quantite_necessaire: number; stock_actuel: number; stock_apres: number
+  is_deficit: boolean; is_alerte: boolean
 }
 
+interface SubstitutRow {
+  id: string; composant_id: string; substitut_id: string; priorite: number; note: string | null
+  substitut_nom: string; substitut_ref: string; substitut_statut: string; substitut_stock: number
+}
+
+// Resolved line for the recap
+interface ResolvedLine {
+  composant_id: string; composant_nom: string; composant_ref: string
+  quantite_necessaire: number; stock_actuel: number
+  // Resolution
+  status: 'green' | 'orange' | 'red'
+  used_id: string // actual component ID to consume (original or substitut)
+  used_nom: string
+  is_substitut: boolean
+  checked: boolean
+}
+
+interface FabHistory {
+  id: string; produit_id: string; produit_nom: string; quantite: number
+  mode: string; operateur: string; batch_id: string
+  cancelled: boolean; cancelled_at: string | null; cancelled_by: string | null
+  created_at: string
+}
+
+interface OperateurStats { operateur: string; total: number; fabrications: number; maintenances: number }
+
+interface ComposantOption { id: string; reference: string; nom: string; statut: string }
+
+// ─── Page ───
+
 export default function FabricationPage() {
+  const [tab, setTab] = useState('lancer')
+  const [mode, setMode] = useState<'fabrication' | 'maintenance'>('fabrication')
   const [produits, setProduits] = useState<ProduitFini[]>([])
+  const [operateurs, setOperateurs] = useState<Operateur[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [quantite, setQuantite] = useState('1')
-  const [operateur, setOperateur] = useState('Rafa')
+  const [operateur, setOperateur] = useState('')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<FabResult | null>(null)
   const [preview, setPreview] = useState<BomPreview[]>([])
+  const [resolvedLines, setResolvedLines] = useState<ResolvedLine[]>([])
+
+  // History
+  const [history, setHistory] = useState<FabHistory[]>([])
+  const [historySearch, setHistorySearch] = useState('')
+
+  // Cancel dialog
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelItem, setCancelItem] = useState<FabHistory | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+
+  // Stats
+  const [stats, setStats] = useState<OperateurStats[]>([])
+
+  // Substitut management modal
+  const [subModalOpen, setSubModalOpen] = useState(false)
+  const [subModalComposantId, setSubModalComposantId] = useState('')
+  const [subModalComposantNom, setSubModalComposantNom] = useState('')
+  const [subModalSubs, setSubModalSubs] = useState<SubstitutRow[]>([])
+  const [subModalAddSearch, setSubModalAddSearch] = useState('')
+  const [subModalAddId, setSubModalAddId] = useState('')
+  const [subModalAddNote, setSubModalAddNote] = useState('')
+  const [subModalAdding, setSubModalAdding] = useState(false)
+  const [allComposants, setAllComposants] = useState<ComposantOption[]>([])
+
+  // Component detail modal
+  const [detailModalId, setDetailModalId] = useState<string | null>(null)
+
+  const loadHistory = useCallback(() => {
+    const sb = createSupabaseClient()
+    sb.from('fabrication_history')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
+      .then(({ data }) => setHistory((data as FabHistory[]) ?? []))
+  }, [])
 
   useEffect(() => {
     const sb = createSupabaseClient()
-    sb.from('produits')
-      .select('id, reference, nom')
-      .eq('statut', 'Produit fini')
-      .order('nom')
+    sb.from('produits').select('id, reference, nom').eq('statut', 'Produit fini').order('nom')
       .then(({ data }) => setProduits(data ?? []))
-  }, [])
+
+    sb.from('operateurs').select('id, nom, email').order('nom')
+      .then(({ data }) => {
+        const ops = (data ?? []) as Operateur[]
+        setOperateurs(ops)
+        if (ops.length > 0 && !operateur) setOperateur(ops[0].nom)
+      })
+
+    sb.from('produits').select('id, reference, nom, statut').in('statut', ['Composant', 'Obsolète']).order('nom')
+      .then(({ data }) => setAllComposants((data as ComposantOption[]) ?? []))
+
+    loadHistory()
+  }, [loadHistory])
+
+  // Stats
+  useEffect(() => {
+    const map = new Map<string, OperateurStats>()
+    for (const h of history) {
+      if (h.cancelled) continue
+      if (!map.has(h.operateur)) map.set(h.operateur, { operateur: h.operateur, total: 0, fabrications: 0, maintenances: 0 })
+      const s = map.get(h.operateur)!
+      s.total++
+      if (h.mode === 'fabrication') s.fabrications++; else s.maintenances++
+    }
+    setStats(Array.from(map.values()).sort((a, b) => b.total - a.total))
+  }, [history])
+
+  // ─── BOM preview + substitut resolution ───
+
+  async function resolveSubstituts(bomData: BomPreview[]) {
+    const sb = createSupabaseClient()
+    const lines: ResolvedLine[] = []
+
+    for (const b of bomData) {
+      const line: ResolvedLine = {
+        composant_id: b.composant_id, composant_nom: b.nom, composant_ref: b.reference,
+        quantite_necessaire: b.quantite_necessaire, stock_actuel: b.stock_actuel,
+        status: 'green', used_id: b.composant_id, used_nom: b.nom,
+        is_substitut: false, checked: mode === 'fabrication',
+      }
+
+      // Check if component is obsolete
+      const { data: compData } = await sb.from('produits').select('statut').eq('id', b.composant_id).single()
+      const isObsolete = compData?.statut === 'Obsolète'
+
+      // In fabrication mode, obsolete components must use substituts
+      // In maintenance mode, obsolete components are usable
+      const needsSubstitut = isObsolete && mode === 'fabrication'
+        ? true
+        : b.stock_actuel < b.quantite_necessaire
+
+      if (!needsSubstitut) {
+        line.status = isObsolete && mode === 'maintenance' ? 'orange' : 'green'
+      } else {
+        // Try substituts
+        const { data: subs } = await sb
+          .from('substituts')
+          .select('id, substitut_id, priorite, note, substitut:substitut_id(nom, reference, statut, stock_actuel)')
+          .eq('composant_id', b.composant_id)
+          .order('priorite')
+
+        let found = false
+        for (const s of (subs ?? [])) {
+          const sub = s.substitut as unknown as { nom: string; reference: string; statut: string; stock_actuel: number } | null
+          if (!sub) continue
+          if (sub.stock_actuel >= b.quantite_necessaire) {
+            line.status = 'orange'
+            line.used_id = s.substitut_id
+            line.used_nom = sub.nom
+            line.is_substitut = true
+            found = true
+            break
+          }
+        }
+        if (!found) {
+          line.status = 'red'
+          line.checked = false
+        }
+      }
+
+      lines.push(line)
+    }
+
+    setResolvedLines(lines)
+  }
 
   useEffect(() => {
     if (!selectedId || !quantite) {
       setPreview([])
+      setResolvedLines([])
       return
     }
     const sb = createSupabaseClient()
     sb.rpc('resolve_bom', {
       p_produit_id: selectedId,
       p_quantite: parseInt(quantite, 10) || 1,
-    }).then(({ data }) => setPreview((data as BomPreview[]) ?? []))
-  }, [selectedId, quantite])
-
-  async function handleFabrication() {
-    if (!selectedId) return
-    setLoading(true)
-    const sb = createSupabaseClient()
-    const { data, error } = await sb.rpc('apply_fabrication', {
-      p_produit_id: selectedId,
-      p_quantite: parseInt(quantite, 10) || 1,
-      p_utilisateur: operateur,
+    }).then(({ data }) => {
+      const bomData = (data as BomPreview[]) ?? []
+      setPreview(bomData)
+      resolveSubstituts(bomData)
     })
+  }, [selectedId, quantite, mode])
 
-    if (error) {
-      toast.error('Erreur: ' + error.message)
-    } else {
-      const res = data as FabResult
-      setResult(res)
-      if (res.has_deficit) {
-        toast.warning(
-          `Fabrication effectuee avec ${res.deficits.length} deficit(s)`
-        )
-      } else {
-        toast.success(
-          `Fabrication de ${res.quantite_fabriquee}x ${res.produit} reussie`
-        )
-      }
-    }
-    setLoading(false)
+  function toggleLine(composantId: string) {
+    setResolvedLines((prev) => prev.map((l) =>
+      l.composant_id === composantId ? { ...l, checked: !l.checked } : l
+    ))
   }
 
+  const hasBlockingRed = resolvedLines.some((l) => l.checked && l.status === 'red')
+  const hasAnyRed = resolvedLines.some((l) => l.status === 'red')
+
+  // ─── Substitut management modal ───
+
+  async function openSubModal(composantId: string, composantNom: string) {
+    setSubModalComposantId(composantId)
+    setSubModalComposantNom(composantNom)
+    setSubModalAdding(false)
+    setSubModalAddSearch('')
+    setSubModalAddId('')
+    setSubModalAddNote('')
+    await loadSubModalSubs(composantId)
+    setSubModalOpen(true)
+  }
+
+  async function loadSubModalSubs(composantId: string) {
+    const sb = createSupabaseClient()
+    const { data } = await sb
+      .from('substituts')
+      .select('id, composant_id, substitut_id, priorite, note, substitut:substitut_id(nom, reference, statut, stock_actuel)')
+      .eq('composant_id', composantId)
+      .order('priorite')
+
+    setSubModalSubs((data ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      composant_id: r.composant_id as string,
+      substitut_id: r.substitut_id as string,
+      priorite: r.priorite as number,
+      note: r.note as string | null,
+      substitut_nom: (r.substitut as { nom: string } | null)?.nom ?? '',
+      substitut_ref: (r.substitut as { reference: string } | null)?.reference ?? '',
+      substitut_statut: (r.substitut as { statut: string } | null)?.statut ?? '',
+      substitut_stock: (r.substitut as { stock_actuel: number } | null)?.stock_actuel ?? 0,
+    })))
+  }
+
+  async function handleSubModalAdd() {
+    if (!subModalAddId) return
+    const sb = createSupabaseClient()
+    const nextPrio = subModalSubs.length > 0 ? Math.max(...subModalSubs.map((s) => s.priorite)) + 1 : 1
+    const { error } = await sb.from('substituts').insert({
+      composant_id: subModalComposantId,
+      substitut_id: subModalAddId,
+      priorite: nextPrio,
+      note: subModalAddNote.trim() || null,
+    })
+    if (error) { toast.error(error.message); return }
+    toast.success('Substitut ajoute')
+    setSubModalAdding(false)
+    setSubModalAddId('')
+    setSubModalAddNote('')
+    await loadSubModalSubs(subModalComposantId)
+  }
+
+  async function handleSubModalDelete(subId: string) {
+    const sb = createSupabaseClient()
+    await sb.from('substituts').delete().eq('id', subId)
+    const remaining = subModalSubs.filter((s) => s.id !== subId)
+    for (let i = 0; i < remaining.length; i++) {
+      await sb.from('substituts').update({ priorite: i + 1 }).eq('id', remaining[i].id)
+    }
+    await loadSubModalSubs(subModalComposantId)
+  }
+
+  async function handleSubModalMove(subId: string, dir: 'up' | 'down') {
+    const idx = subModalSubs.findIndex((s) => s.id === subId)
+    if (idx < 0) return
+    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= subModalSubs.length) return
+    const sb = createSupabaseClient()
+    const a = subModalSubs[idx], b = subModalSubs[swapIdx]
+    await Promise.all([
+      sb.from('substituts').update({ priorite: b.priorite }).eq('id', a.id),
+      sb.from('substituts').update({ priorite: a.priorite }).eq('id', b.id),
+    ])
+    await loadSubModalSubs(subModalComposantId)
+  }
+
+  function handleSubModalClose() {
+    setSubModalOpen(false)
+    // Re-resolve substituts
+    if (preview.length > 0) {
+      resolveSubstituts(preview)
+    }
+  }
+
+  const filteredSubAddComposants = allComposants.filter((c) => {
+    if (c.id === subModalComposantId) return false
+    if (subModalSubs.some((s) => s.substitut_id === c.id)) return false
+    if (!subModalAddSearch.trim()) return true
+    const s = subModalAddSearch.toLowerCase()
+    return c.nom.toLowerCase().includes(s) || c.reference.toLowerCase().includes(s)
+  })
+
+  // ─── Launch fabrication ───
+
+  async function handleLancer() {
+    if (!selectedId || !operateur) return
+    if (hasBlockingRed) {
+      toast.error('Composants sans stock ni substitut. Impossible de lancer.')
+      return
+    }
+
+    setLoading(true)
+    const sb = createSupabaseClient()
+    const batchId = crypto.randomUUID()
+    const qty = parseInt(quantite, 10) || 1
+    const checkedLines = resolvedLines.filter((l) => l.checked)
+    let errors = 0
+
+    for (const line of checkedLines) {
+      const { data: produit } = await sb
+        .from('produits')
+        .select('stock_actuel')
+        .eq('id', line.used_id)
+        .single()
+
+      if (!produit) { errors++; continue }
+
+      const newStock = produit.stock_actuel - line.quantite_necessaire
+      await sb.from('produits').update({ stock_actuel: newStock }).eq('id', line.used_id)
+
+      const desc = line.is_substitut
+        ? `${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} — ${line.used_nom} (substitut de ${line.composant_nom}) (x${line.quantite_necessaire})`
+        : `${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} — ${line.composant_nom} (x${line.quantite_necessaire})`
+
+      await sb.from('mouvements').insert({
+        description: desc, type: 'Sortie', source: 'Fabrication',
+        produit_id: line.used_id, quantite: -line.quantite_necessaire,
+        valide_par: operateur, batch_id: batchId, mode: mode,
+        notes: `${mode} — ${produits.find((p) => p.id === selectedId)?.nom ?? ''} x${qty}`,
+      })
+    }
+
+    if (mode === 'fabrication') {
+      const { data: finishedProd } = await sb.from('produits').select('stock_actuel').eq('id', selectedId).single()
+      if (finishedProd) {
+        await sb.from('produits').update({ stock_actuel: finishedProd.stock_actuel + qty }).eq('id', selectedId)
+        await sb.from('mouvements').insert({
+          description: `Fabrication — ${produits.find((p) => p.id === selectedId)?.nom ?? ''} (+${qty})`,
+          type: 'Entrée', source: 'Fabrication', produit_id: selectedId, quantite: qty,
+          valide_par: operateur, batch_id: batchId, mode: mode,
+        })
+      }
+    }
+
+    await sb.from('fabrication_history').insert({
+      produit_id: selectedId, produit_nom: produits.find((p) => p.id === selectedId)?.nom ?? '',
+      quantite: qty, mode: mode, operateur: operateur, batch_id: batchId,
+    })
+
+    if (errors > 0) {
+      toast.warning(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} terminee avec ${errors} erreur(s)`)
+    } else {
+      toast.success(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} de ${qty}x ${produits.find((p) => p.id === selectedId)?.nom ?? ''} reussie`)
+    }
+
+    setLoading(false)
+    setPreview([])
+    setResolvedLines([])
+    setSelectedId('')
+    setQuantite('1')
+    loadHistory()
+  }
+
+  // ─── Cancel ───
+
+  async function handleCancel() {
+    if (!cancelItem) return
+    setCancelling(true)
+    const sb = createSupabaseClient()
+    const { data: batchMouvements } = await sb.from('mouvements').select('*').eq('batch_id', cancelItem.batch_id)
+
+    if (batchMouvements) {
+      for (const m of batchMouvements) {
+        const { data: produit } = await sb.from('produits').select('stock_actuel').eq('id', m.produit_id).single()
+        if (produit) {
+          await sb.from('produits').update({ stock_actuel: produit.stock_actuel - m.quantite }).eq('id', m.produit_id)
+        }
+      }
+      const reversalBatchId = crypto.randomUUID()
+      for (const m of batchMouvements) {
+        await sb.from('mouvements').insert({
+          description: `Annulation — ${m.description}`,
+          type: m.quantite > 0 ? 'Sortie' : 'Entrée', source: 'Fabrication',
+          produit_id: m.produit_id, quantite: -m.quantite,
+          valide_par: operateur || 'Rafa', batch_id: reversalBatchId, mode: 'annulation',
+          notes: `Annulation de ${cancelItem.mode} du ${new Date(cancelItem.created_at).toLocaleDateString('fr-FR')}`,
+        })
+      }
+    }
+
+    await sb.from('fabrication_history').update({
+      cancelled: true, cancelled_at: new Date().toISOString(), cancelled_by: operateur || 'Rafa',
+    }).eq('id', cancelItem.id)
+
+    toast.success('Operation annulee — stock readjuste')
+    setCancelling(false)
+    setCancelOpen(false)
+    loadHistory()
+  }
+
+  const filteredHistory = history.filter((h) => {
+    if (!historySearch.trim()) return true
+    const s = historySearch.toLowerCase()
+    return h.produit_nom.toLowerCase().includes(s) || h.operateur.toLowerCase().includes(s) || h.mode.toLowerCase().includes(s)
+  })
+
+  // ─── Render ───
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Fabrication</h1>
+    <div className="space-y-6 max-w-7xl">
+      <h1 className="text-2xl font-bold">Fabrication / Maintenance</h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Lancer une fabrication</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Produit fini</Label>
-              <Select value={selectedId} onValueChange={(v) => setSelectedId(v ?? '')}>
-                <SelectTrigger>
-                  {selectedId
-                    ? produits.find((p) => p.id === selectedId)?.nom ?? 'Choisir un produit'
-                    : 'Choisir un produit'}
-                </SelectTrigger>
-                <SelectContent>
-                  {produits.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.nom}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Quantite</Label>
-              <Input
-                type="number"
-                min={1}
-                value={quantite}
-                onChange={(e) => setQuantite(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Operateur</Label>
-              <Input
-                value={operateur}
-                onChange={(e) => setOperateur(e.target.value)}
-              />
-            </div>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="lancer">Lancer</TabsTrigger>
+          <TabsTrigger value="historique">Historique</TabsTrigger>
+          <TabsTrigger value="stats">Statistiques</TabsTrigger>
+        </TabsList>
+
+        {/* ═══ Tab: Lancer ═══ */}
+        <TabsContent value="lancer" className="mt-4 space-y-6">
+          <div className="flex gap-2">
+            <Button variant={mode === 'fabrication' ? 'default' : 'outline'} onClick={() => setMode('fabrication')}>
+              <Factory className="h-4 w-4 mr-1.5" />Fabrication
+            </Button>
+            <Button variant={mode === 'maintenance' ? 'default' : 'outline'} onClick={() => setMode('maintenance')}>
+              <Wrench className="h-4 w-4 mr-1.5" />Maintenance
+            </Button>
           </div>
-          <Button
-            onClick={handleFabrication}
-            disabled={!selectedId || loading}
-          >
-            {loading ? 'En cours...' : 'Lancer la fabrication'}
-          </Button>
-        </CardContent>
-      </Card>
 
-      {preview.length > 0 && !result && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Apercu BOM</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Composant</TableHead>
-                  <TableHead>Qte requise</TableHead>
-                  <TableHead>Stock actuel</TableHead>
-                  <TableHead>Stock apres</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.map((b) => (
-                  <TableRow key={b.composant_id}>
-                    <TableCell className="font-medium">{b.nom}</TableCell>
-                    <TableCell>{b.quantite_necessaire}</TableCell>
-                    <TableCell>{b.stock_actuel}</TableCell>
-                    <TableCell>
-                      <span
-                        className={
-                          b.is_deficit
-                            ? 'text-red-600 font-bold'
-                            : b.is_alerte
-                              ? 'text-yellow-600 font-bold'
-                              : ''
-                        }
-                      >
-                        {b.stock_apres}
-                      </span>
-                    </TableCell>
+          <Card>
+            <CardHeader>
+              <CardTitle>{mode === 'fabrication' ? 'Lancer une fabrication' : 'Lancer une maintenance'}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Produit fini</Label>
+                  <Select value={selectedId} onValueChange={(v) => setSelectedId(v ?? '')}>
+                    <SelectTrigger>{selectedId ? produits.find((p) => p.id === selectedId)?.nom ?? 'Choisir' : 'Choisir un produit'}</SelectTrigger>
+                    <SelectContent>{produits.map((p) => (<SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>))}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Quantite</Label>
+                  <Input type="number" min={1} value={quantite} onChange={(e) => setQuantite(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Operateur</Label>
+                  <Select value={operateur} onValueChange={(v) => setOperateur(v ?? '')}>
+                    <SelectTrigger>{operateur || 'Choisir un operateur'}</SelectTrigger>
+                    <SelectContent>{operateurs.map((o) => (<SelectItem key={o.id} value={o.nom}>{o.nom}</SelectItem>))}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {hasAnyRed && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800">
+                  <strong>Stock insuffisant</strong> — Certains composants n&apos;ont pas de substitut disponible.
+                  Ajoutez des substituts ou ajustez le stock.
+                </div>
+              )}
+
+              <Button
+                onClick={handleLancer}
+                disabled={!selectedId || !operateur || loading || hasBlockingRed || resolvedLines.length === 0}
+              >
+                {loading ? 'En cours...' : 'Confirmer la ' + (mode === 'fabrication' ? 'fabrication' : 'maintenance')}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* ═══ Recap table with substitut resolution ═══ */}
+          {resolvedLines.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle>Recapitulatif</CardTitle></CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10"></TableHead>
+                      <TableHead>Composant principal</TableHead>
+                      <TableHead>Substitut utilise</TableHead>
+                      <TableHead>Qte</TableHead>
+                      <TableHead>Statut</TableHead>
+                      <TableHead className="w-40"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {resolvedLines.map((l) => (
+                      <TableRow key={l.composant_id}>
+                        <TableCell>
+                          <Checkbox
+                            checked={l.checked}
+                            disabled={l.status === 'red'}
+                            onCheckedChange={() => toggleLine(l.composant_id)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                            {l.composant_nom}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          {l.is_substitut ? (
+                            <span className="text-orange-700">{l.used_nom}</span>
+                          ) : (
+                            <span className="text-muted-foreground">(composant principal)</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{l.quantite_necessaire}</TableCell>
+                        <TableCell>
+                          {l.status === 'green' && <span className="text-lg">&#x2705;</span>}
+                          {l.status === 'orange' && <span className="text-lg">&#x26A0;&#xFE0F;</span>}
+                          {l.status === 'red' && <span className="text-lg">&#x1F534;</span>}
+                        </TableCell>
+                        <TableCell>
+                          {l.status === 'orange' && (
+                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
+                              <Settings2 className="h-3 w-3 mr-1" />Gerer substituts
+                            </Button>
+                          )}
+                          {l.status === 'red' && (
+                            <Button variant="outline" size="sm" className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
+                              <Plus className="h-3 w-3 mr-1" />Ajouter un substitut
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ═══ Tab: Historique ═══ */}
+        <TabsContent value="historique" className="mt-4 space-y-4">
+          <div className="relative max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Rechercher..." value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} className="pl-9" />
+          </div>
+          <Card>
+            <CardContent className="pt-6">
+              {filteredHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun historique.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead><TableHead>Mode</TableHead><TableHead>Produit</TableHead>
+                      <TableHead className="text-right">Qte</TableHead><TableHead>Operateur</TableHead>
+                      <TableHead>Statut</TableHead><TableHead className="w-20"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredHistory.map((h) => (
+                      <TableRow key={h.id} className={h.cancelled ? 'opacity-50' : ''}>
+                        <TableCell className="tabular-nums">{new Date(h.created_at).toLocaleDateString('fr-FR')}</TableCell>
+                        <TableCell>
+                          <Badge className={h.mode === 'fabrication' ? 'bg-blue-100 text-blue-800 border-blue-200 text-[11px]' : 'bg-purple-100 text-purple-800 border-purple-200 text-[11px]'}>
+                            {h.mode === 'fabrication' ? 'Fabrication' : 'Maintenance'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-medium">{h.produit_nom}</TableCell>
+                        <TableCell className="text-right tabular-nums">{h.quantite}</TableCell>
+                        <TableCell>{h.operateur}</TableCell>
+                        <TableCell>
+                          {h.cancelled
+                            ? <Badge className="bg-red-100 text-red-800 border-red-200 text-[11px]">Annulee</Badge>
+                            : <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[11px]">OK</Badge>}
+                        </TableCell>
+                        <TableCell>
+                          {!h.cancelled && (
+                            <Button variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive" onClick={() => { setCancelItem(h); setCancelOpen(true) }}>
+                              <Undo2 className="h-3.5 w-3.5 mr-1" />Annuler
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ═══ Tab: Stats ═══ */}
+        <TabsContent value="stats" className="mt-4">
+          <Card>
+            <CardHeader><CardTitle>Statistiques par operateur</CardTitle></CardHeader>
+            <CardContent>
+              {stats.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune donnee.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Operateur</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Fabrications</TableHead>
+                      <TableHead className="text-right">Maintenances</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stats.map((s) => (
+                      <TableRow key={s.operateur}>
+                        <TableCell className="font-medium">{s.operateur}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.total}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.fabrications}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.maintenances}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* ═══ Dialog: Annuler ═══ */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Annuler cette operation ?</DialogTitle></DialogHeader>
+          {cancelItem && (
+            <div className="space-y-2 py-2 text-sm">
+              <p><strong>{cancelItem.mode === 'fabrication' ? 'Fabrication' : 'Maintenance'}</strong> de <strong>{cancelItem.quantite}x {cancelItem.produit_nom}</strong></p>
+              <p className="text-muted-foreground">Par {cancelItem.operateur} le {new Date(cancelItem.created_at).toLocaleDateString('fr-FR')}</p>
+              <p className="text-amber-700 bg-amber-50 rounded-lg p-3 text-sm">Le stock sera automatiquement readjuste.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelOpen(false)}>Non, garder</Button>
+            <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>{cancelling ? 'Annulation...' : 'Oui, annuler'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Modal: Gestion des substituts ═══ */}
+      <Dialog open={subModalOpen} onOpenChange={(open) => { if (!open) handleSubModalClose() }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Substituts de &quot;{subModalComposantNom}&quot;</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {subModalSubs.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Aucun substitut defini.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">Prio</TableHead>
+                    <TableHead>Composant</TableHead>
+                    <TableHead className="text-right">Stock</TableHead>
+                    <TableHead>Note</TableHead>
+                    <TableHead className="w-28"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {subModalSubs.map((s, idx) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="tabular-nums font-medium">{s.priorite}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <button type="button" className="font-medium text-sm text-blue-700 hover:underline cursor-pointer" onClick={() => setDetailModalId(s.substitut_id)}>
+                            {s.substitut_nom}
+                          </button>
+                          {s.substitut_statut === 'Obsolète' && (
+                            <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolete</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{s.substitut_stock}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{s.note ?? '—'}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-0.5 justify-end">
+                          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={idx === 0} onClick={() => handleSubModalMove(s.id, 'up')}>
+                            <ArrowUp className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={idx === subModalSubs.length - 1} onClick={() => handleSubModalMove(s.id, 'down')}>
+                            <ArrowDown className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleSubModalDelete(s.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
 
-      {result && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Resultat: {result.quantite_fabriquee}x {result.produit}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>Composants mis a jour: {result.composants_mis_a_jour}</p>
-            {result.deficits.length > 0 && (
-              <div className="rounded bg-red-50 p-3 text-red-800">
-                <p className="font-bold">Deficits:</p>
-                <ul className="list-disc list-inside">
-                  {result.deficits.map((d, i) => (
-                    <li key={i}>
-                      {d.nom}: stock = {d.stock_apres}
-                    </li>
-                  ))}
-                </ul>
+            {subModalAdding ? (
+              <div className="space-y-3 border rounded-lg p-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input placeholder="Rechercher un composant..." value={subModalAddSearch} onChange={(e) => setSubModalAddSearch(e.target.value)} className="pl-9" />
+                </div>
+                <div className="max-h-36 overflow-y-auto border rounded-lg">
+                  {filteredSubAddComposants.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-3">Aucun composant disponible</p>
+                  ) : (
+                    filteredSubAddComposants.map((c) => (
+                      <button key={c.id} type="button"
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent cursor-pointer ${subModalAddId === c.id ? 'bg-accent' : ''}`}
+                        onClick={() => setSubModalAddId(c.id)}
+                      >
+                        <span className="font-medium">{c.nom}</span>
+                        <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
+                        {c.statut === 'Obsolète' && <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolete</Badge>}
+                      </button>
+                    ))
+                  )}
+                </div>
+                <Input placeholder="Note (optionnel)" value={subModalAddNote} onChange={(e) => setSubModalAddNote(e.target.value)} />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSubModalAdd} disabled={!subModalAddId}>Ajouter</Button>
+                  <Button size="sm" variant="outline" onClick={() => setSubModalAdding(false)}>Annuler</Button>
+                </div>
               </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => { setSubModalAdding(true); setSubModalAddSearch(''); setSubModalAddId('') }}>
+                <Plus className="h-3.5 w-3.5 mr-1" />Ajouter un substitut
+              </Button>
             )}
-            {result.alertes.length > 0 && (
-              <div className="rounded bg-yellow-50 p-3 text-yellow-800">
-                <p className="font-bold">Alertes:</p>
-                <ul className="list-disc list-inside">
-                  {result.alertes.map((a, i) => (
-                    <li key={i}>
-                      {a.nom}: stock = {a.stock_apres} (seuil: {a.seuil})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          <DialogFooter>
+            <Button onClick={handleSubModalClose}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Component detail modal ═══ */}
+      <ComposantModal
+        composantId={detailModalId}
+        open={!!detailModalId}
+        onClose={() => setDetailModalId(null)}
+        onChanged={() => { if (preview.length > 0) resolveSubstituts(preview) }}
+      />
     </div>
   )
 }

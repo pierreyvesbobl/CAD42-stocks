@@ -21,9 +21,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
 import { ProductCombobox } from '@/components/product-combobox'
-import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, X } from 'lucide-react'
+import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -65,7 +64,7 @@ interface Facture {
   en_attente: number
 }
 
-const FAMILLES = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
+const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
 // ─── Page ───
@@ -91,6 +90,7 @@ export default function ValidationPage() {
     statut: 'Composant',
     prix_ht: '',
   })
+  const [familles, setFamilles] = useState<string[]>(FAMILLES_DEFAULT)
 
   const loadData = useCallback(() => {
     const sb = createSupabaseClient()
@@ -122,6 +122,15 @@ export default function ValidationPage() {
       .select('id, reference, nom, description, famille, statut')
       .order('nom')
       .then(({ data }) => setProduits((data as ProduitOption[]) ?? []))
+
+    sb.from('familles')
+      .select('nom')
+      .order('nom')
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setFamilles((data as { nom: string }[]).map((f) => f.nom))
+        }
+      })
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
@@ -314,11 +323,12 @@ export default function ValidationPage() {
 
   function openCreateProduct(rowId: string, _refDetectee: string | null) {
     setCreateForRowId(rowId)
+    const row = allRows.find((r) => r.id === rowId)
     setNewProduct({
       nom: '',
-      famille: 'Accessoire',
+      famille: familles.length > 0 ? familles[0] : 'Accessoire',
       statut: 'Composant',
-      prix_ht: '',
+      prix_ht: row?.prix_ht_unitaire != null ? String(row.prix_ht_unitaire) : '',
     })
     setCreateOpen(true)
   }
@@ -440,212 +450,122 @@ export default function ValidationPage() {
           )}
         </div>
 
-        {/* Lignes */}
+        {/* Lignes — toutes au même endroit, même format */}
         <div className="space-y-3">
-            {pendingRows.length > 0 && (
-              <>
-                <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                  A valider ({pendingRows.length})
-                </h2>
-                {pendingRows.map((r) => (
-                  <Card key={r.id}>
-                    <CardContent className="py-3 space-y-2">
+          {selectedRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              Aucune ligne pour cette facture.
+            </p>
+          ) : (
+            selectedRows.map((r) => {
+              const isPending = r.statut?.includes('valider') || r.statut === 'A valider' || r.statut === 'À valider'
+              const isValidated = r.statut?.includes('Valid') && !isPending
+              const isRejected = r.statut?.includes('Rejet')
+              const isTreated = isValidated || isRejected
+
+              return (
+                <Card key={r.id} className={isTreated ? 'border-l-4 opacity-50 hover:opacity-100 transition-opacity ' + (isValidated ? 'border-l-emerald-400' : 'border-l-red-400') : ''}>
+                  <CardContent className="py-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {isTreated && (
+                        <Badge
+                          className={cn(
+                            'text-[11px]',
+                            isValidated
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              : 'bg-red-100 text-red-800 border-red-200'
+                          )}
+                        >
+                          {r.statut}
+                        </Badge>
+                      )}
+                      {confianceBadge(r.confiance_ia)}
+                      <span className="text-sm">{r.ligne}</span>
+                    </div>
+
+                    {r.ref_detectee && (
+                      <p className="text-xs text-muted-foreground">
+                        Ref : <span className="font-mono text-foreground">{r.ref_detectee}</span>
+                      </p>
+                    )}
+
+                    {r.produit_suggere_reference && r.confiance_ia !== 'Inconnu' && isPending && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">Suggestion : </span>
+                        <span className="font-medium text-emerald-700">{r.produit_suggere_reference}</span>
+                      </p>
+                    )}
+
+                    {r.confiance_ia === 'Inconnu' && isPending && (
+                      <p className="text-xs text-amber-700">
+                        Aucune correspondance — selectionnez ou creez un produit.
+                      </p>
+                    )}
+
+                    {isTreated && editingRowId !== r.id ? (
                       <div className="flex items-center gap-2">
-                        {confianceBadge(r.confiance_ia)}
-                        <span className="text-sm">{r.ligne}</span>
+                        <span className="text-sm text-muted-foreground flex-1 truncate">
+                          {produits.find((p) => p.id === (overrides[r.id]?.produitId || r.produit_suggere_id))?.nom ?? '—'}
+                          {' '}
+                          <span className="tabular-nums">x{overrides[r.id]?.quantite ?? r.quantite ?? 1}</span>
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() => setEditingRowId(r.id)}
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Modifier
+                        </Button>
                       </div>
-
-                      {r.ref_detectee && (
-                        <p className="text-xs text-muted-foreground">
-                          Ref :{' '}
-                          <span className="font-mono text-foreground">
-                            {r.ref_detectee}
-                          </span>
-                        </p>
-                      )}
-
-                      {r.produit_suggere_reference &&
-                        r.confiance_ia !== 'Inconnu' && (
-                          <p className="text-xs">
-                            <span className="text-muted-foreground">
-                              Suggestion :{' '}
-                            </span>
-                            <span className="font-medium text-emerald-700">
-                              {r.produit_suggere_reference}
-                            </span>
-                          </p>
-                        )}
-
-                      {r.confiance_ia === 'Inconnu' && (
-                        <p className="text-xs text-amber-700">
-                          Aucune correspondance — selectionnez ou creez un
-                          produit.
-                        </p>
-                      )}
-
+                    ) : (
                       <div className="flex items-center gap-2">
                         <div className="flex-1">
                           <ProductCombobox
                             products={produits}
                             selectedId={overrides[r.id]?.produitId ?? ''}
-                            onSelect={(id) =>
-                              updateOverride(r.id, 'produitId', id)
-                            }
-                            onCreateNew={() =>
-                              openCreateProduct(r.id, r.ref_detectee)
-                            }
+                            onSelect={(id) => updateOverride(r.id, 'produitId', id)}
+                            onCreateNew={() => openCreateProduct(r.id, r.ref_detectee)}
                           />
                         </div>
                         <Input
                           type="number"
                           className="w-20 h-9"
-                          value={overrides[r.id]?.quantite ?? '1'}
-                          onChange={(e) =>
-                            updateOverride(r.id, 'quantite', e.target.value)
-                          }
+                          value={overrides[r.id]?.quantite ?? String(r.quantite ?? 1)}
+                          onChange={(e) => updateOverride(r.id, 'quantite', e.target.value)}
                         />
                         {r.prix_ht_unitaire != null && (
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
                             x {r.prix_ht_unitaire}&euro;
                           </span>
                         )}
-                        <Button
-                          size="sm"
-                          className="h-9"
-                          onClick={() => handleValidate(r)}
-                        >
-                          Valider
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9"
-                          onClick={() => handleReject(r.id)}
-                        >
-                          Rejeter
-                        </Button>
+                        {isTreated ? (
+                          <>
+                            <Button size="sm" className="h-9" onClick={async () => { await handleRevalidate(r); setEditingRowId(null) }}>
+                              Valider
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-9" onClick={() => { handleReopen(r.id); setEditingRowId(null) }}>
+                              {isRejected ? 'Reouvrir' : 'Rejeter'}
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" className="h-9" onClick={() => handleValidate(r)}>
+                              Valider
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-9" onClick={() => handleReject(r.id)}>
+                              Rejeter
+                            </Button>
+                          </>
+                        )}
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </>
-            )}
-
-            {doneRows.length > 0 && (
-              <>
-                {pendingRows.length > 0 && <Separator className="my-2" />}
-                <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                  Traitees ({doneRows.length})
-                </h2>
-                {doneRows.map((r) => {
-                  const isEditing = editingRowId === r.id
-                  const selectedProd = produits.find(
-                    (p) => p.id === (overrides[r.id]?.produitId || r.produit_suggere_id)
-                  )
-
-                  if (isEditing) {
-                    return (
-                      <Card key={r.id}>
-                        <CardContent className="py-3 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              className={cn(
-                                'text-[11px]',
-                                r.statut?.includes('Valid')
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                  : 'bg-red-100 text-red-800 border-red-200'
-                              )}
-                            >
-                              {r.statut}
-                            </Badge>
-                            <span className="text-sm flex-1">{r.ligne}</span>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => setEditingRowId(null)}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1">
-                              <ProductCombobox
-                                products={produits}
-                                selectedId={overrides[r.id]?.produitId ?? ''}
-                                onSelect={(id) => updateOverride(r.id, 'produitId', id)}
-                                onCreateNew={() => openCreateProduct(r.id, r.ref_detectee)}
-                              />
-                            </div>
-                            <Input
-                              type="number"
-                              className="w-20 h-9"
-                              value={overrides[r.id]?.quantite ?? String(r.quantite ?? 1)}
-                              onChange={(e) => updateOverride(r.id, 'quantite', e.target.value)}
-                            />
-                            <Button
-                              size="sm"
-                              className="h-9"
-                              onClick={async () => {
-                                await handleRevalidate(r)
-                                setEditingRowId(null)
-                              }}
-                            >
-                              Enregistrer
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  }
-
-                  return (
-                    <Card key={r.id} className="group opacity-50 hover:opacity-80 transition-opacity">
-                      <CardContent className="py-3">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            className={cn(
-                              'text-[11px]',
-                              r.statut?.includes('Valid')
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                : 'bg-red-100 text-red-800 border-red-200'
-                            )}
-                          >
-                            {r.statut}
-                          </Badge>
-                          <span className="text-sm flex-1">{r.ligne}</span>
-                          {selectedProd && (
-                            <span className="text-xs text-muted-foreground">
-                              {selectedProd.nom}
-                            </span>
-                          )}
-                          {r.quantite && (
-                            <span className="text-xs tabular-nums text-muted-foreground">
-                              x{r.quantite}
-                            </span>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100"
-                            onClick={() => setEditingRowId(r.id)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </>
-            )}
-
-            {selectedRows.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                Aucune ligne pour cette facture.
-              </p>
-            )}
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })
+          )}
         </div>
 
         {/* Dialog creation produit */}
@@ -682,7 +602,7 @@ export default function ValidationPage() {
                   >
                     <SelectTrigger>{newProduct.famille}</SelectTrigger>
                     <SelectContent>
-                      {FAMILLES.map((f) => (
+                      {familles.map((f) => (
                         <SelectItem key={f} value={f}>
                           {f}
                         </SelectItem>

@@ -47,7 +47,7 @@ interface LigneInventaire {
   checked: boolean
 }
 
-const FAMILLES = ['Toutes', 'RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
+const FAMILLES_DEFAULT = ['Toutes', 'RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const FILTRES_ECART = ['Tous', 'Avec ecart', 'Verifies', 'Non verifies']
 
 export default function InventairePage() {
@@ -58,6 +58,7 @@ export default function InventairePage() {
   const [operateur, setOperateur] = useState('Rafa')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [famillesList, setFamillesList] = useState<string[]>(['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre'])
 
   const loadProduits = useCallback(() => {
     const sb = createSupabaseClient()
@@ -76,6 +77,18 @@ export default function InventairePage() {
   }, [])
 
   useEffect(() => { loadProduits() }, [loadProduits])
+
+  useEffect(() => {
+    const sb = createSupabaseClient()
+    sb.from('familles')
+      .select('nom')
+      .order('nom')
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setFamillesList((data as { nom: string }[]).map((f) => f.nom))
+        }
+      })
+  }, [])
 
   function updateLigne(id: string, stock: string) {
     setLignes((prev) =>
@@ -219,7 +232,8 @@ export default function InventairePage() {
             <SelectValue placeholder="Famille" />
           </SelectTrigger>
           <SelectContent>
-            {FAMILLES.map((f) => (
+            <SelectItem value="Toutes">Toutes</SelectItem>
+            {famillesList.map((f) => (
               <SelectItem key={f} value={f}>{f}</SelectItem>
             ))}
           </SelectContent>

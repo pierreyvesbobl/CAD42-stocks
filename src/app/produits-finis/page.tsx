@@ -12,14 +12,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import { StockBadge } from '@/components/stock-badge'
+import { Search } from 'lucide-react'
 
 interface Produit {
   id: string
@@ -33,73 +28,52 @@ interface Produit {
   prix_ht: number
 }
 
-const STATUTS = ['Tous', 'Composant', 'Produit fini', 'Location', 'Obsolète']
-
-export default function CataloguePage() {
+export default function ProduitsFinisPage() {
   const router = useRouter()
   const [produits, setProduits] = useState<Produit[]>([])
-  const [familles, setFamilles] = useState<string[]>([])
-  const [famille, setFamille] = useState('Toutes')
-  const [statut, setStatut] = useState('Tous')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     const sb = createSupabaseClient()
-    sb.from('familles')
-      .select('nom')
+    sb.from('produits')
+      .select('id, reference, nom, description, famille, statut, stock_actuel, seuil_alerte, prix_ht')
+      .eq('statut', 'Produit fini')
       .order('nom')
-      .then(({ data }) => setFamilles((data ?? []).map((f: { nom: string }) => f.nom)))
+      .then(({ data }) => setProduits(data ?? []))
   }, [])
 
-  useEffect(() => {
-    const sb = createSupabaseClient()
-    let query = sb
-      .from('produits')
-      .select('id, reference, nom, description, famille, statut, stock_actuel, seuil_alerte, prix_ht')
-      .order('nom')
-
-    if (famille !== 'Toutes') query = query.eq('famille', famille)
-    if (statut !== 'Tous') query = query.eq('statut', statut)
-
-    query.then(({ data }) => setProduits(data ?? []))
-  }, [famille, statut])
+  const filtered = produits.filter((p) => {
+    if (search.trim()) {
+      const s = search.toLowerCase()
+      return (
+        p.nom.toLowerCase().includes(s) ||
+        p.reference.toLowerCase().includes(s) ||
+        (p.description ?? '').toLowerCase().includes(s)
+      )
+    }
+    return true
+  })
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Catalogue</h1>
+      <h1 className="text-2xl font-bold">Produits finis</h1>
 
       <div className="flex gap-4">
-        <Select value={famille} onValueChange={(v) => setFamille(v ?? 'Toutes')}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Famille" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Toutes">Toutes</SelectItem>
-            {familles.map((f) => (
-              <SelectItem key={f} value={f}>
-                {f}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={statut} onValueChange={(v) => setStatut(v ?? 'Tous')}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Statut" />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUTS.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Rechercher un produit fini..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>
-            {produits.length} produit{produits.length > 1 ? 's' : ''}
+            {filtered.length} produit{filtered.length > 1 ? 's' : ''} fini{filtered.length > 1 ? 's' : ''}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -107,15 +81,13 @@ export default function CataloguePage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Nom</TableHead>
-                <TableHead>Ref interne</TableHead>
                 <TableHead>Famille</TableHead>
-                <TableHead>Statut</TableHead>
                 <TableHead>Prix HT</TableHead>
                 <TableHead>Stock</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {produits.map((p) => (
+              {filtered.map((p) => (
                 <TableRow
                   key={p.id}
                   className="cursor-pointer hover:bg-muted/50"
@@ -127,9 +99,7 @@ export default function CataloguePage() {
                       <div className="text-xs text-muted-foreground truncate max-w-xs">{p.description}</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs">{p.reference}</TableCell>
                   <TableCell>{p.famille}</TableCell>
-                  <TableCell>{p.statut}</TableCell>
                   <TableCell>{p.prix_ht} &euro;</TableCell>
                   <TableCell>
                     <StockBadge

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -15,16 +16,12 @@ import { StockBadge } from '@/components/stock-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   AlertTriangle,
-  ShieldAlert,
   Clock,
-  Activity,
 } from 'lucide-react'
 
 interface KPIs {
-  stockNegatif: number
   sousSeuil: number
   enAttente: number
-  mouvementsDuJour: number
 }
 
 interface AlerteRow {
@@ -38,66 +35,39 @@ interface AlerteRow {
   marge: number
 }
 
-interface MouvementRow {
-  id: string
-  description: string
-  date: string
-  type: string
-  quantite: number
-  source: string
-}
-
 const KPI_CONFIG = [
-  { key: 'stockNegatif' as const, title: 'Stock negatif', icon: ShieldAlert, color: 'text-red-600' },
-  { key: 'sousSeuil' as const, title: "Sous seuil d'alerte", icon: AlertTriangle, color: 'text-amber-600' },
-  { key: 'enAttente' as const, title: 'En attente validation', icon: Clock, color: 'text-blue-600' },
-  { key: 'mouvementsDuJour' as const, title: 'Mouvements du jour', icon: Activity, color: 'text-foreground' },
+  { key: 'enAttente' as const, title: 'En attente validation', icon: Clock, color: 'text-blue-600', href: '/validation' },
+  { key: 'sousSeuil' as const, title: "Sous seuil d'alerte", icon: AlertTriangle, color: 'text-amber-600', href: null },
 ]
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [alertes, setAlertes] = useState<AlerteRow[]>([])
-  const [mouvements, setMouvements] = useState<MouvementRow[]>([])
 
   useEffect(() => {
     const sb = createSupabaseClient()
 
     async function load() {
-      const [negRes, seuilRes, attenteRes, mouvJourRes, alerteRes, mouvRes] =
+      const [seuilRes, attenteRes, alerteRes] =
         await Promise.all([
-          sb
-            .from('produits')
-            .select('id', { count: 'exact', head: true })
-            .lt('stock_actuel', 0),
           sb.from('v_stock_bas').select('id', { count: 'exact', head: true }),
           sb
             .from('file_validation')
             .select('id', { count: 'exact', head: true })
             .in('statut', ['À valider', 'A valider']),
           sb
-            .from('mouvements')
-            .select('id', { count: 'exact', head: true })
-            .eq('date', new Date().toISOString().split('T')[0]),
-          sb
             .from('v_stock_bas')
             .select('*')
             .order('marge', { ascending: true })
             .limit(10),
-          sb
-            .from('mouvements')
-            .select('id, description, date, type, quantite, source')
-            .order('created_at', { ascending: false })
-            .limit(10),
         ])
 
       setKpis({
-        stockNegatif: negRes.count ?? 0,
         sousSeuil: seuilRes.count ?? 0,
         enAttente: attenteRes.count ?? 0,
-        mouvementsDuJour: mouvJourRes.count ?? 0,
       })
       setAlertes((alerteRes.data as AlerteRow[]) ?? [])
-      setMouvements((mouvRes.data as MouvementRow[]) ?? [])
     }
 
     load()
@@ -112,9 +82,13 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {KPI_CONFIG.map(({ key, title, icon: Icon, color }) => (
-          <Card key={key}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {KPI_CONFIG.map(({ key, title, icon: Icon, color, href }) => (
+          <Card
+            key={key}
+            className={href ? 'cursor-pointer hover:border-[#a6cb4d]/50 transition-colors' : ''}
+            onClick={href ? () => router.push(href) : undefined}
+          >
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {title}
@@ -169,42 +143,6 @@ export default function DashboardPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{a.seuil_alerte}</TableCell>
                     <TableCell className="text-right tabular-nums">{a.marge}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Derniers mouvements</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {mouvements.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucun mouvement.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Quantite</TableHead>
-                  <TableHead>Source</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mouvements.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="tabular-nums">{m.date}</TableCell>
-                    <TableCell>{m.type}</TableCell>
-                    <TableCell className="max-w-xs truncate text-muted-foreground">
-                      {m.description}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{m.quantite}</TableCell>
-                    <TableCell className="text-muted-foreground">{m.source}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
