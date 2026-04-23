@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthLayout } from '@/components/auth-layout'
+import { ThemeProvider } from '@/components/theme-provider'
 
 const inter = Inter({
   variable: '--font-sans',
@@ -27,11 +28,19 @@ export default function RootLayout({
   return (
     <html
       lang="fr"
+      suppressHydrationWarning
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full font-sans">
-        <AuthLayout>{children}</AuthLayout>
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <AuthLayout>{children}</AuthLayout>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )

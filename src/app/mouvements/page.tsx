@@ -25,7 +25,7 @@ import { FileText, Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
 
-const TYPES = ['Tous', 'Entree', 'Sortie', 'Fabrication', 'Ajustement']
+const TYPES = ['Tous', 'Entrée', 'Sortie', 'Fabrication', 'Ajustement']
 const PAGE_SIZE = 20
 
 interface Mouvement {
@@ -75,7 +75,7 @@ export default function MouvementsPage() {
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
     if (typeFilter !== 'Tous') {
-      if (typeFilter === 'Entree') query = query.eq('type', 'Entrée')
+      if (typeFilter === 'Entrée') query = query.eq('type', 'Entrée')
       else if (typeFilter === 'Fabrication') query = query.eq('source', 'Fabrication')
       else query = query.eq('type', typeFilter)
     }
@@ -201,7 +201,7 @@ export default function MouvementsPage() {
         </Select>
 
         <Input
-          placeholder="N facture..."
+          placeholder="N° facture..."
           value={factureFilter}
           onChange={(e) => { setFactureFilter(e.target.value); setPage(0) }}
           className="w-48"
@@ -220,9 +220,9 @@ export default function MouvementsPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead className="text-right">Quantite</TableHead>
+                <TableHead className="text-right">Quantité</TableHead>
                 <TableHead>Source</TableHead>
-                <TableHead>Ref facture</TableHead>
+                <TableHead>Réf facture</TableHead>
                 <TableHead>Par</TableHead>
               </TableRow>
             </TableHeader>
@@ -334,7 +334,7 @@ export default function MouvementsPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                Precedent
+                Précédent
               </Button>
               <span className="text-sm text-muted-foreground">
                 Page {page + 1} / {totalPages}

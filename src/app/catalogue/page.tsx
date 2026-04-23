@@ -107,7 +107,7 @@ export default function CataloguePage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Nom</TableHead>
-                <TableHead>Ref interne</TableHead>
+                <TableHead>Réf interne</TableHead>
                 <TableHead>Famille</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead>Prix HT</TableHead>

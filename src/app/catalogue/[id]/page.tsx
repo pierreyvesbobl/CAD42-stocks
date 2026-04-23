@@ -256,11 +256,11 @@ export default function ProduitDetailPage() {
     }
     setProduit(updated)
     setEditing(false)
-    toast.success('Produit modifie')
+    toast.success('Produit modifié')
   }
 
   async function handleAddRef() {
-    if (!newRef.reference.trim()) { toast.error('Reference requise'); return }
+    if (!newRef.reference.trim()) { toast.error('Référence requise'); return }
     const sb = createSupabaseClient()
     const { data, error } = await sb
       .from('references_fournisseurs')
@@ -271,7 +271,7 @@ export default function ProduitDetailPage() {
     setRefsFournisseurs((prev) => [...prev, data as RefFournisseur])
     setNewRef({ reference: '', fournisseur: '' })
     setAddingRef(false)
-    toast.success('Reference fournisseur ajoutee')
+    toast.success('Référence fournisseur ajoutée')
   }
 
   async function handleDeleteRef(refId: string) {
@@ -279,14 +279,14 @@ export default function ProduitDetailPage() {
     const { error } = await sb.from('references_fournisseurs').delete().eq('id', refId)
     if (error) { toast.error(error.message); return }
     setRefsFournisseurs((prev) => prev.filter((r) => r.id !== refId))
-    toast.success('Reference supprimee')
+    toast.success('Référence supprimée')
   }
 
   async function handleDelete() {
     const sb = createSupabaseClient()
     const { error } = await sb.from('produits').delete().eq('id', id)
     if (error) { toast.error(error.message); return }
-    toast.success('Produit supprime')
+    toast.success('Produit supprimé')
     router.push('/composants')
   }
 
@@ -305,9 +305,9 @@ export default function ProduitDetailPage() {
         notes: `Stock: ${produit.stock_actuel} → ${qty}`,
       })
       setProduit({ ...produit, stock_actuel: qty })
-      toast.success(`Stock ajuste: ${qty}`)
+      toast.success(`Stock ajusté: ${qty}`)
     } else {
-      toast.error('Erreur lors de la mise a jour')
+      toast.error('Erreur lors de la mise à jour')
     }
     setSaving(false)
   }
@@ -338,7 +338,7 @@ export default function ProduitDetailPage() {
   async function handleAddSubstitut() {
     if (!selectedSubId) return
     if (wouldCreateLoop(selectedSubId)) {
-      toast.error('Boucle de substitution detectee — interdit')
+      toast.error('Boucle de substitution détectée — interdit')
       return
     }
 
@@ -351,7 +351,7 @@ export default function ProduitDetailPage() {
       note: subNote.trim() || null,
     })
     if (error) { toast.error(error.message); return }
-    toast.success('Substitut ajoute')
+    toast.success('Substitut ajouté')
     setAddSubOpen(false)
     setSelectedSubId('')
     setSubNote('')
@@ -363,7 +363,7 @@ export default function ProduitDetailPage() {
     const sb = createSupabaseClient()
     const { error } = await sb.from('substituts').delete().eq('id', subId)
     if (error) { toast.error(error.message); return }
-    toast.success('Substitut retire')
+    toast.success('Substitut retiré')
     // Reorder remaining
     const remaining = substituts.filter((s) => s.id !== subId)
     for (let i = 0; i < remaining.length; i++) {
@@ -475,7 +475,7 @@ export default function ProduitDetailPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-muted-foreground">Famille :</span> {produit.famille}</div>
               <div><span className="text-muted-foreground">Statut :</span> {produit.statut}</div>
-              <div><span className="text-muted-foreground">Ref interne :</span> <span className="font-mono">{produit.reference}</span></div>
+              <div><span className="text-muted-foreground">Réf interne :</span> <span className="font-mono">{produit.reference}</span></div>
               <div><span className="text-muted-foreground">Prix HT :</span> {produit.prix_ht} &euro;</div>
               <div><span className="text-muted-foreground">Seuil alerte :</span> {produit.seuil_alerte}</div>
               <div><span className="text-muted-foreground">Stock :</span> <StockBadge stockActuel={produit.stock_actuel} seuilAlerte={produit.seuil_alerte} /></div>
@@ -497,15 +497,15 @@ export default function ProduitDetailPage() {
       {/* ═══ BOM (Produit fini only) ═══ */}
       {produit.statut === 'Produit fini' && bom.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Nomenclature (BOM pour 1 unite)</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Nomenclature (BOM pour 1 unité)</CardTitle></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Composant</TableHead>
-                  <TableHead>Qte requise</TableHead>
+                  <TableHead>Qté requise</TableHead>
                   <TableHead>Stock actuel</TableHead>
-                  <TableHead>Stock apres</TableHead>
+                  <TableHead>Stock après</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -536,7 +536,7 @@ export default function ProduitDetailPage() {
                 <div>
                   <CardTitle>Substituts</CardTitle>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Utilises si ce composant est en rupture de stock
+                    Utilisés si ce composant est en rupture de stock
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => { setAddSubOpen(true); setSubSearch(''); setSelectedSubId(''); setSubNote('') }}>
@@ -546,7 +546,7 @@ export default function ProduitDetailPage() {
             </CardHeader>
             <CardContent>
               {substituts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Aucun substitut defini.</p>
+                <p className="text-sm text-muted-foreground">Aucun substitut défini.</p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -566,7 +566,7 @@ export default function ProduitDetailPage() {
                             <span className="font-medium">{s.substitut_nom}</span>
                             <span className="text-xs text-muted-foreground font-mono">{s.substitut_ref}</span>
                             {s.substitut_statut === 'Obsolète' && (
-                              <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolete</Badge>
+                              <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolète</Badge>
                             )}
                           </div>
                         </TableCell>
@@ -595,7 +595,7 @@ export default function ProduitDetailPage() {
           {usedAsSubstitut.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Utilise comme substitut de</CardTitle>
+                <CardTitle>Utilisé comme substitut de</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-1.5">
@@ -604,7 +604,7 @@ export default function ProduitDetailPage() {
                       <span className="text-muted-foreground">·</span>
                       <span className="font-medium">{u.composant_nom}</span>
                       <span className="text-xs text-muted-foreground font-mono">{u.composant_ref}</span>
-                      <span className="text-xs text-muted-foreground">(priorite {u.priorite})</span>
+                      <span className="text-xs text-muted-foreground">(priorité {u.priorite})</span>
                     </div>
                   ))}
                 </div>
@@ -618,7 +618,7 @@ export default function ProduitDetailPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>References fournisseurs</CardTitle>
+            <CardTitle>Références fournisseurs</CardTitle>
             {!addingRef && (
               <Button size="sm" variant="outline" onClick={() => setAddingRef(true)}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />Ajouter
@@ -630,8 +630,8 @@ export default function ProduitDetailPage() {
           {addingRef && (
             <div className="flex items-end gap-2 mb-4">
               <div className="space-y-1.5 flex-1">
-                <Label>Reference</Label>
-                <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Ref fournisseur" />
+                <Label>Référence</Label>
+                <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Réf fournisseur" />
               </div>
               <div className="space-y-1.5 flex-1">
                 <Label>Fournisseur</Label>
@@ -642,12 +642,12 @@ export default function ProduitDetailPage() {
             </div>
           )}
           {refsFournisseurs.length === 0 && !addingRef ? (
-            <p className="text-sm text-muted-foreground">Aucune reference fournisseur.</p>
+            <p className="text-sm text-muted-foreground">Aucune référence fournisseur.</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Reference</TableHead>
+                  <TableHead>Référence</TableHead>
                   <TableHead>Fournisseur</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
@@ -683,7 +683,7 @@ export default function ProduitDetailPage() {
                   <TableHead>Date</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Description</TableHead>
-                  <TableHead>Quantite</TableHead>
+                  <TableHead>Quantité</TableHead>
                   <TableHead>Source</TableHead>
                 </TableRow>
               </TableHeader>
@@ -708,7 +708,7 @@ export default function ProduitDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Supprimer le produit</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground py-2">
-            Supprimer <strong>{produit.nom}</strong> ? Cette action est irreversible. Les mouvements associes ne seront pas supprimes.
+            Supprimer <strong>{produit.nom}</strong> ? Cette action est irréversible. Les mouvements associés ne seront pas supprimés.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
@@ -748,7 +748,7 @@ export default function ProduitDetailPage() {
                       <span className="font-medium">{c.nom}</span>
                       <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
                       {c.statut === 'Obsolète' && (
-                        <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolete</Badge>
+                        <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolète</Badge>
                       )}
                       {isLoop && (
                         <span className="text-[10px] text-red-500 ml-auto">boucle</span>
@@ -760,7 +760,7 @@ export default function ProduitDetailPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Note (optionnel)</Label>
-              <Input value={subNote} onChange={(e) => setSubNote(e.target.value)} placeholder="Ex: Degrade acceptable" />
+              <Input value={subNote} onChange={(e) => setSubNote(e.target.value)} placeholder="Ex: Dégradé acceptable" />
             </div>
           </div>
           <DialogFooter>

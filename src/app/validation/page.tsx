@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -22,7 +22,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProductCombobox } from '@/components/product-combobox'
-import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil } from 'lucide-react'
+import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, Mail, Upload, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -64,6 +64,17 @@ interface Facture {
   en_attente: number
 }
 
+interface FactureRejetee {
+  id: string
+  file_name: string | null
+  fournisseur: string | null
+  date_facture: string | null
+  categorie: string | null
+  raison_rejet: string | null
+  pdf_storage_path: string
+  imported_at: string
+}
+
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
@@ -71,6 +82,7 @@ const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
 export default function ValidationPage() {
   const [allRows, setAllRows] = useState<ValidationRow[]>([])
+  const [rejectedImports, setRejectedImports] = useState<FactureRejetee[]>([])
   const [produits, setProduits] = useState<ProduitOption[]>([])
   const [overrides, setOverrides] = useState<
     Record<string, { produitId: string; quantite: string }>
@@ -91,6 +103,10 @@ export default function ValidationPage() {
     prix_ht: '',
   })
   const [familles, setFamilles] = useState<string[]>(FAMILLES_DEFAULT)
+
+  const [fetching, setFetching] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const loadData = useCallback(() => {
     const sb = createSupabaseClient()
@@ -131,6 +147,12 @@ export default function ValidationPage() {
           setFamilles((data as { nom: string }[]).map((f) => f.nom))
         }
       })
+
+    sb.from('factures_imports')
+      .select('id, file_name, fournisseur, date_facture, categorie, raison_rejet, pdf_storage_path, imported_at')
+      .eq('statut_import', 'rejete')
+      .order('imported_at', { ascending: false })
+      .then(({ data }) => setRejectedImports((data as FactureRejetee[]) ?? []))
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
@@ -167,10 +189,14 @@ export default function ValidationPage() {
     })
   })()
 
-  function factureStatut(f: Facture): 'traitee' | 'en_cours' | 'a_traiter' {
-    if (f.en_attente === 0) return 'traitee'
-    if (f.validees > 0 || f.rejetees > 0) return 'en_cours'
-    return 'a_traiter'
+  function factureStatut(f: Facture): 'traitee' | 'en_cours' | 'a_traiter' | 'rejetee' {
+    if (f.en_attente > 0) {
+      if (f.validees > 0 || f.rejetees > 0) return 'en_cours'
+      return 'a_traiter'
+    }
+    // plus de lignes en attente
+    if (f.validees === 0 && f.rejetees > 0) return 'rejetee'
+    return 'traitee'
   }
 
   const filteredFactures = factures.filter((f) => {
@@ -182,13 +208,19 @@ export default function ValidationPage() {
       )
         return false
     }
-    if (tab === 'a_traiter') return factureStatut(f) !== 'traitee'
-    if (tab === 'traitees') return factureStatut(f) === 'traitee'
-    return true
+    const st = factureStatut(f)
+    if (tab === 'a_traiter') return st === 'a_traiter' || st === 'en_cours'
+    if (tab === 'traitees') return st === 'traitee'
+    return false
   })
 
-  const countATraiter = factures.filter((f) => factureStatut(f) !== 'traitee').length
+  const countATraiter = factures.filter((f) => {
+    const st = factureStatut(f)
+    return st === 'a_traiter' || st === 'en_cours'
+  }).length
   const countTraitees = factures.filter((f) => factureStatut(f) === 'traitee').length
+  const facturesRejeteesManuel = factures.filter((f) => factureStatut(f) === 'rejetee')
+  const countRejetees = rejectedImports.length + facturesRejeteesManuel.length
 
   // ─── Detail facture ───
 
@@ -224,7 +256,7 @@ export default function ValidationPage() {
   async function handleValidate(row: ValidationRow) {
     const o = overrides[row.id]
     if (!o?.produitId) {
-      toast.error('Selectionnez un produit')
+      toast.error('Sélectionnez un produit')
       return
     }
     const sb = createSupabaseClient()
@@ -252,7 +284,7 @@ export default function ValidationPage() {
     if (error) {
       toast.error(error.message)
     } else {
-      toast.success('Ligne rejetee')
+      toast.success('Ligne rejetée')
       loadData()
     }
   }
@@ -260,7 +292,7 @@ export default function ValidationPage() {
   async function handleRevalidate(row: ValidationRow) {
     const o = overrides[row.id]
     if (!o?.produitId) {
-      toast.error('Selectionnez un produit')
+      toast.error('Sélectionnez un produit')
       return
     }
     const sb = createSupabaseClient()
@@ -302,7 +334,7 @@ export default function ValidationPage() {
       toast.error(error.message)
     } else {
       const res = data as { success: boolean; produit: string; quantite_ajoutee: number }
-      toast.success(`Re-valide: +${res.quantite_ajoutee} ${res.produit}`)
+      toast.success(`Re-validé: +${res.quantite_ajoutee} ${res.produit}`)
       loadData()
     }
   }
@@ -318,6 +350,65 @@ export default function ValidationPage() {
     } else {
       toast.success('Ligne remise en attente')
       loadData()
+    }
+  }
+
+  async function handleFetchOutlook() {
+    setFetching(true)
+    try {
+      const res = await fetch('/api/factures/fetch-outlook?sinceHours=24', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Échec récupération Outlook')
+        return
+      }
+      type ProcessedItem = { error?: string; skipped?: boolean }
+      const items: ProcessedItem[] = data.processed ?? []
+      const imported = items.filter((p) => !p.error && !p.skipped).length
+      const skipped = items.filter((p) => p.skipped).length
+      const errored = items.filter((p) => !!p.error).length
+      const s = data.stats
+      const detail = s
+        ? ` · scan ${s.messagesScanned} (sans PJ ${s.skippedNoAttachment}, sans PDF ${s.skippedNoPdf})`
+        : ''
+      let msg = `${imported} facture(s) importée(s)`
+      type ProcItem = { error?: string; skipped?: boolean; rejected?: boolean }
+      const rejected = (items as ProcItem[]).filter((p) => p.rejected).length
+      if (skipped) msg += `, ${skipped} doublon(s) ignoré(s)`
+      if (rejected) msg += `, ${rejected} rejetée(s) en amont`
+      if (errored) msg += `, ${errored} erreur(s)`
+      toast.success(msg + detail)
+      loadData()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setFetching(false)
+    }
+  }
+
+  async function handleUploadFacture(file: File) {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/factures/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Échec upload')
+        return
+      }
+      if (data.skipped) {
+        toast.info(`Doublon ignoré : ${data.fileName} déjà importé (${data.existingRefFacture ?? 'sans ref'})`)
+      } else if (data.rejected) {
+        toast.info(`Facture rejetée en amont (${data.categorie}) : ${data.raison ?? 'non-stockable'}`)
+      } else {
+        toast.success(`${data.lignesInserted} ligne(s) importée(s) depuis ${data.fileName}`)
+      }
+      loadData()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -381,7 +472,7 @@ export default function ValidationPage() {
     if (createForRowId) {
       updateOverride(createForRowId, 'produitId', created.id)
     }
-    toast.success(`Produit "${created.nom}" cree`)
+    toast.success(`Produit "${created.nom}" créé`)
     setCreateOpen(false)
   }
 
@@ -402,11 +493,11 @@ export default function ValidationPage() {
     const s = factureStatut(f)
     switch (s) {
       case 'traitee':
-        return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[11px]">Traitee</Badge>
+        return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[11px]">Traitée</Badge>
       case 'en_cours':
         return <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[11px]">En cours</Badge>
       case 'a_traiter':
-        return <Badge variant="destructive" className="text-[11px]">A traiter</Badge>
+        return <Badge variant="destructive" className="text-[11px]">À traiter</Badge>
     }
   }
 
@@ -435,7 +526,7 @@ export default function ValidationPage() {
                 ? ` — ${selectedFactureData.date_facture}`
                 : ''}
               {' — '}
-              {pendingRows.length} en attente, {doneRows.length} traitee{doneRows.length > 1 ? 's' : ''}
+              {pendingRows.length} en attente, {doneRows.length} traitée{doneRows.length > 1 ? 's' : ''}
             </p>
           </div>
           {pdfUrl && (
@@ -485,7 +576,7 @@ export default function ValidationPage() {
 
                     {r.ref_detectee && (
                       <p className="text-xs text-muted-foreground">
-                        Ref : <span className="font-mono text-foreground">{r.ref_detectee}</span>
+                        Réf : <span className="font-mono text-foreground">{r.ref_detectee}</span>
                       </p>
                     )}
 
@@ -498,7 +589,7 @@ export default function ValidationPage() {
 
                     {r.confiance_ia === 'Inconnu' && isPending && (
                       <p className="text-xs text-amber-700">
-                        Aucune correspondance — selectionnez ou creez un produit.
+                        Aucune correspondance — sélectionnez ou créez un produit.
                       </p>
                     )}
 
@@ -546,7 +637,7 @@ export default function ValidationPage() {
                               Valider
                             </Button>
                             <Button size="sm" variant="outline" className="h-9" onClick={() => { handleReopen(r.id); setEditingRowId(null) }}>
-                              {isRejected ? 'Reouvrir' : 'Rejeter'}
+                              {isRejected ? 'Réouvrir' : 'Rejeter'}
                             </Button>
                           </>
                         ) : (
@@ -574,7 +665,7 @@ export default function ValidationPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5" />
-                Creer un nouveau produit
+                Créer un nouveau produit
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
@@ -650,7 +741,7 @@ export default function ValidationPage() {
               </Button>
               <Button onClick={handleCreateProduct}>
                 <Plus className="h-4 w-4 mr-1" />
-                Creer le produit
+                Créer le produit
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -663,15 +754,54 @@ export default function ValidationPage() {
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Validation</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {factures.length} facture{factures.length > 1 ? 's' : ''} importees
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Validation</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {factures.length + rejectedImports.length} facture{factures.length + rejectedImports.length > 1 ? 's' : ''} en entrée
+            {countRejetees > 0 && ` · ${countATraiter + countTraitees} conservée${countATraiter + countTraitees > 1 ? 's' : ''}, ${countRejetees} rejetée${countRejetees > 1 ? 's' : ''}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleFetchOutlook}
+            disabled={fetching || uploading}
+          >
+            {fetching ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Mail className="h-4 w-4 mr-2" />
+            )}
+            Récupérer Outlook (24h)
+          </Button>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleUploadFacture(f)
+              e.target.value = ''
+            }}
+          />
+          <Button
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={fetching || uploading}
+          >
+            {uploading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 mr-2" />
+            )}
+            Importer une facture
+          </Button>
+        </div>
       </div>
 
       <Input
-        placeholder="Rechercher par ref ou fournisseur..."
+        placeholder="Rechercher par réf ou fournisseur..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="w-80"
@@ -679,13 +809,88 @@ export default function ValidationPage() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="a_traiter">A traiter ({countATraiter})</TabsTrigger>
-          <TabsTrigger value="traitees">Traitees ({countTraitees})</TabsTrigger>
-          <TabsTrigger value="toutes">Toutes ({factures.length})</TabsTrigger>
+          <TabsTrigger value="a_traiter">À traiter ({countATraiter})</TabsTrigger>
+          <TabsTrigger value="traitees">Traitées ({countTraitees})</TabsTrigger>
+          <TabsTrigger value="rejetees">Rejetées ({countRejetees})</TabsTrigger>
         </TabsList>
 
         <TabsContent value={tab} className="mt-4">
-          {filteredFactures.length === 0 ? (
+          {tab === 'rejetees' ? (
+            countRejetees === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Aucune facture rejetée.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {rejectedImports.map((r) => (
+                  <Card
+                    key={`amont-${r.id}`}
+                    className="cursor-pointer hover:border-[#a6cb4d]/50 transition-colors"
+                    onClick={async () => {
+                      const { data, error } = await createSupabaseClient()
+                        .storage.from('factures')
+                        .createSignedUrl(r.pdf_storage_path, 3600)
+                      if (error || !data) {
+                        toast.error('PDF introuvable')
+                        return
+                      }
+                      window.open(data.signedUrl, '_blank')
+                    }}
+                  >
+                    <CardContent className="py-3">
+                      <div className="flex items-center gap-4">
+                        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-medium truncate max-w-md">
+                          {r.file_name ?? '(fichier)'}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {r.fournisseur ?? '—'}
+                        </span>
+                        <div className="ml-auto flex items-center gap-3">
+                          <Badge variant="outline" className="text-xs">
+                            {r.categorie ?? 'rejete'}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground max-w-xs truncate">
+                            {r.raison_rejet ?? '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                {facturesRejeteesManuel.map((f) => (
+                  <Card
+                    key={`manuel-${f.ref_facture}`}
+                    className="cursor-pointer hover:border-[#a6cb4d]/50 transition-colors"
+                    onClick={() => openFacture(f.ref_facture, f.pdf_storage_path)}
+                  >
+                    <CardContent className="py-3">
+                      <div className="flex items-center gap-4">
+                        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="font-mono text-sm font-medium">
+                          {f.ref_facture}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {f.fournisseur ?? '—'}
+                        </span>
+                        <span className="text-sm tabular-nums text-muted-foreground">
+                          {f.date_facture ?? '—'}
+                        </span>
+                        <div className="ml-auto flex items-center gap-3">
+                          <Badge variant="outline" className="text-xs">manuel</Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {f.rejetees} ligne{f.rejetees > 1 ? 's' : ''} rejetée{f.rejetees > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )
+          ) : filteredFactures.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 Aucune facture.
@@ -723,12 +928,12 @@ export default function ValidationPage() {
                           )}
                           {f.validees > 0 && (
                             <span className="text-emerald-700">
-                              {f.validees} validee{f.validees > 1 ? 's' : ''}
+                              {f.validees} validée{f.validees > 1 ? 's' : ''}
                             </span>
                           )}
                           {f.rejetees > 0 && (
                             <span className="text-red-600">
-                              {f.rejetees} rejetee{f.rejetees > 1 ? 's' : ''}
+                              {f.rejetees} rejetée{f.rejetees > 1 ? 's' : ''}
                             </span>
                           )}
                         </div>

@@ -21,14 +21,14 @@ import {
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/validation', label: 'Validation', icon: FileCheck, badgeKey: 'validation' },
   { href: '/composants', label: 'Composants', icon: Package },
   { href: '/produits-finis', label: 'Produits finis', icon: BoxIcon },
   { href: '/nomenclatures', label: 'Nomenclatures', icon: Layers },
   { href: '/fabrication', label: 'Fabrication', icon: Factory },
-  { href: '/validation', label: 'Validation', icon: FileCheck, badgeKey: 'validation' },
   { href: '/mouvements', label: 'Mouvements', icon: ArrowLeftRight },
   { href: '/inventaire', label: 'Inventaire', icon: ClipboardList },
-  { href: '/parametres', label: 'Parametres', icon: Settings },
+  { href: '/parametres', label: 'Paramètres', icon: Settings },
 ]
 
 export function SidebarNav() {
@@ -99,7 +99,7 @@ export function SidebarNav() {
           onClick={handleLogout}
         >
           <LogOut className="h-3.5 w-3.5 mr-2" />
-          Deconnexion
+          Déconnexion
         </Button>
       </div>
     </aside>

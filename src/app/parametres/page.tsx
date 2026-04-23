@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useTheme } from 'next-themes'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -18,12 +19,26 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Save, Sun, Moon, Monitor } from 'lucide-react'
 import { toast } from 'sonner'
+
+interface SettingInfo {
+  key: string
+  source: 'env' | 'db' | 'none'
+  masked: string | null
+  set: boolean
+  updated_at: string | null
+}
 
 interface Operateur {
   id: string
@@ -40,6 +55,48 @@ interface Famille {
 
 export default function ParametresPage() {
   const [tab, setTab] = useState('operateurs')
+
+  // ─── Theme ───
+  const { theme, setTheme, resolvedTheme } = useTheme()
+  const [themeMounted, setThemeMounted] = useState(false)
+  useEffect(() => setThemeMounted(true), [])
+
+  // ─── Integrations (clés API) ───
+  const [settings, setSettings] = useState<SettingInfo[]>([])
+  const [geminiInput, setGeminiInput] = useState('')
+  const [savingGemini, setSavingGemini] = useState(false)
+
+  const loadSettings = useCallback(async () => {
+    const res = await fetch('/api/settings')
+    if (!res.ok) return
+    const data = await res.json()
+    setSettings((data.settings as SettingInfo[]) ?? [])
+  }, [])
+
+  useEffect(() => { loadSettings() }, [loadSettings])
+
+  async function handleSaveGemini() {
+    setSavingGemini(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'gemini_api_key', value: geminiInput }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Échec enregistrement')
+        return
+      }
+      toast.success(data.deleted ? 'Clé supprimée' : 'Clé enregistrée')
+      setGeminiInput('')
+      loadSettings()
+    } finally {
+      setSavingGemini(false)
+    }
+  }
+
+  const geminiSetting = settings.find((s) => s.key === 'gemini_api_key')
 
   // ─── Operateurs ───
   const [operateurs, setOperateurs] = useState<Operateur[]>([])
@@ -107,14 +164,14 @@ export default function ParametresPage() {
         .update({ nom: opForm.nom.trim(), email: opForm.email.trim() || null })
         .eq('id', editingOp.id)
       if (error) { toast.error(error.message); return }
-      toast.success('Operateur modifie')
+      toast.success('Opérateur modifié')
     } else {
       const { error } = await sb.from('operateurs').insert({
         nom: opForm.nom.trim(),
         email: opForm.email.trim() || null,
       })
       if (error) { toast.error(error.message); return }
-      toast.success('Operateur ajoute')
+      toast.success('Opérateur ajouté')
     }
 
     setOpDialogOpen(false)
@@ -126,7 +183,7 @@ export default function ParametresPage() {
     const sb = createSupabaseClient()
     const { error } = await sb.from('operateurs').delete().eq('id', opToDelete.id)
     if (error) { toast.error(error.message); return }
-    toast.success('Operateur supprime')
+    toast.success('Opérateur supprimé')
     setOpDeleteOpen(false)
     loadData()
   }
@@ -171,13 +228,13 @@ export default function ParametresPage() {
         .update({ famille: famForm.nom.trim() })
         .eq('famille', editingFam.nom)
 
-      toast.success('Famille modifiee')
+      toast.success('Famille modifiée')
     } else {
       const { error } = await sb.from('familles').insert({
         nom: famForm.nom.trim(),
       })
       if (error) { toast.error(error.message); return }
-      toast.success('Famille ajoutee')
+      toast.success('Famille ajoutée')
     }
 
     setFamDialogOpen(false)
@@ -189,19 +246,21 @@ export default function ParametresPage() {
     const sb = createSupabaseClient()
     const { error } = await sb.from('familles').delete().eq('id', famToDelete.id)
     if (error) { toast.error(error.message); return }
-    toast.success('Famille supprimee')
+    toast.success('Famille supprimée')
     setFamDeleteOpen(false)
     loadData()
   }
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <h1 className="text-2xl font-bold">Parametres</h1>
+      <h1 className="text-2xl font-bold">Paramètres</h1>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="operateurs">Operateurs</TabsTrigger>
+          <TabsTrigger value="operateurs">Opérateurs</TabsTrigger>
           <TabsTrigger value="familles">Familles</TabsTrigger>
+          <TabsTrigger value="apparence">Apparence</TabsTrigger>
+          <TabsTrigger value="integrations">Intégrations</TabsTrigger>
         </TabsList>
 
         {/* ═══ Operateurs ═══ */}
@@ -210,7 +269,7 @@ export default function ParametresPage() {
             <div className="relative flex-1 max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Rechercher un operateur..."
+                placeholder="Rechercher un opérateur..."
                 value={opSearch}
                 onChange={(e) => setOpSearch(e.target.value)}
                 className="pl-9"
@@ -224,7 +283,7 @@ export default function ParametresPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>{filteredOps.length} operateur{filteredOps.length > 1 ? 's' : ''}</CardTitle>
+              <CardTitle>{filteredOps.length} opérateur{filteredOps.length > 1 ? 's' : ''}</CardTitle>
             </CardHeader>
             <CardContent>
               <Table>
@@ -329,13 +388,143 @@ export default function ParametresPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ═══ Apparence ═══ */}
+        <TabsContent value="apparence" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Thème</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5 max-w-sm">
+                <Label>Mode d&apos;affichage</Label>
+                <Select
+                  value={themeMounted ? (theme ?? 'system') : 'system'}
+                  onValueChange={(v) => v && setTheme(v)}
+                >
+                  <SelectTrigger>
+                    <span className="flex items-center gap-2">
+                      {(() => {
+                        const t = themeMounted ? theme : 'system'
+                        if (t === 'light') return <><Sun className="h-4 w-4" /> Clair</>
+                        if (t === 'dark') return <><Moon className="h-4 w-4" /> Sombre</>
+                        return <><Monitor className="h-4 w-4" /> Système</>
+                      })()}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">
+                      <span className="flex items-center gap-2"><Sun className="h-4 w-4" /> Clair</span>
+                    </SelectItem>
+                    <SelectItem value="dark">
+                      <span className="flex items-center gap-2"><Moon className="h-4 w-4" /> Sombre</span>
+                    </SelectItem>
+                    <SelectItem value="system">
+                      <span className="flex items-center gap-2"><Monitor className="h-4 w-4" /> Système</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {themeMounted && theme === 'system' && (
+                  <p className="text-xs text-muted-foreground">
+                    Actuellement : {resolvedTheme === 'dark' ? 'sombre' : 'clair'} (suit les préférences OS)
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ═══ Integrations ═══ */}
+        <TabsContent value="integrations" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Clé API Gemini</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">État :</span>
+                  {geminiSetting?.set ? (
+                    <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                      Configurée
+                    </span>
+                  ) : (
+                    <span className="font-medium text-amber-700 dark:text-amber-400">
+                      Non configurée
+                    </span>
+                  )}
+                  {geminiSetting?.source === 'env' && (
+                    <span className="text-xs text-muted-foreground">
+                      (via variable d&apos;environnement)
+                    </span>
+                  )}
+                  {geminiSetting?.source === 'db' && (
+                    <span className="text-xs text-muted-foreground">
+                      (enregistrée en base)
+                    </span>
+                  )}
+                </div>
+                {geminiSetting?.masked && (
+                  <div className="font-mono text-xs text-muted-foreground">
+                    {geminiSetting.masked}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5 max-w-md">
+                <Label>Nouvelle clé</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    value={geminiInput}
+                    onChange={(e) => setGeminiInput(e.target.value)}
+                    placeholder="AIzaSy..."
+                    autoComplete="off"
+                  />
+                  <Button
+                    onClick={handleSaveGemini}
+                    disabled={savingGemini || !geminiInput.trim()}
+                  >
+                    <Save className="h-4 w-4 mr-1.5" />
+                    Enregistrer
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {geminiSetting?.source === 'env'
+                    ? 'La variable d\'environnement GEMINI_API_KEY a toujours la priorité. Supprimez-la pour utiliser la clé enregistrée ici.'
+                    : 'La clé est stockée dans la table app_settings (RLS: service_role uniquement).'}
+                </p>
+              </div>
+
+              {geminiSetting?.source === 'db' && (
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const res = await fetch('/api/settings', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ key: 'gemini_api_key', value: '' }),
+                    })
+                    if (res.ok) {
+                      toast.success('Clé supprimée')
+                      loadSettings()
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-1.5" />
+                  Supprimer la clé enregistrée
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Dialog: Add/Edit Operateur */}
       <Dialog open={opDialogOpen} onOpenChange={setOpDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingOp ? 'Modifier' : 'Ajouter'} un operateur</DialogTitle>
+            <DialogTitle>{editingOp ? 'Modifier' : 'Ajouter'} un opérateur</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -343,7 +532,7 @@ export default function ParametresPage() {
               <Input
                 value={opForm.nom}
                 onChange={(e) => setOpForm((f) => ({ ...f, nom: e.target.value }))}
-                placeholder="Nom de l'operateur"
+                placeholder="Nom de l'opérateur"
               />
             </div>
             <div className="space-y-1.5">
@@ -367,10 +556,10 @@ export default function ParametresPage() {
       <Dialog open={opDeleteOpen} onOpenChange={setOpDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Supprimer l&apos;operateur</DialogTitle>
+            <DialogTitle>Supprimer l&apos;opérateur</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground py-2">
-            Supprimer <strong>{opToDelete?.nom}</strong> ? Cette action est irreversible.
+            Supprimer <strong>{opToDelete?.nom}</strong> ? Cette action est irréversible.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpDeleteOpen(false)}>Annuler</Button>

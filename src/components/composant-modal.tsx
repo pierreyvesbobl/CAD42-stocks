@@ -200,7 +200,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
       description: editForm.description.trim() || null,
     })
     setEditing(false)
-    toast.success('Produit modifie')
+    toast.success('Produit modifié')
   }
 
   // ─── Stock ───
@@ -221,7 +221,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
       })
       setProduit({ ...produit, stock_actuel: qty })
       setDirty(true)
-      toast.success(`Stock ajuste: ${qty}`)
+      toast.success(`Stock ajusté: ${qty}`)
     }
     setSaving(false)
   }
@@ -262,7 +262,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
   async function handleAddSubstitut() {
     if (!selectedSubId || !composantId) return
-    if (wouldCreateLoop(selectedSubId)) { toast.error('Boucle de substitution detectee'); return }
+    if (wouldCreateLoop(selectedSubId)) { toast.error('Boucle de substitution détectée'); return }
     const sb = createSupabaseClient()
     const nextPrio = substituts.length > 0 ? Math.max(...substituts.map((s) => s.priorite)) + 1 : 1
     const { error } = await sb.from('substituts').insert({
@@ -270,7 +270,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
       note: subNote.trim() || null,
     })
     if (error) { toast.error(error.message); return }
-    toast.success('Substitut ajoute')
+    toast.success('Substitut ajouté')
     setAddSubOpen(false)
     setSelectedSubId('')
     setSubNote('')
@@ -353,7 +353,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     setDirty(true)
     setMarkingObsolete(false)
     setObsoleteOpen(false)
-    toast.success(`${produit.nom} marque comme obsolete`)
+    toast.success(`${produit.nom} marqué comme obsolète`)
   }
 
   // ─── Render ───
@@ -376,7 +376,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
           <DialogHeader>
             <div className="flex items-center gap-2">
               <DialogTitle>{produit.nom}</DialogTitle>
-              {isObsolete && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[11px]">obsolete</Badge>}
+              {isObsolete && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[11px]">obsolète</Badge>}
             </div>
             <p className="text-sm text-muted-foreground font-mono">{produit.reference}</p>
           </DialogHeader>
@@ -440,7 +440,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                   </Button>
                   {produit.statut === 'Composant' && (
                     <Button size="sm" variant="ghost" className="text-amber-700 hover:text-amber-800" onClick={analyzeObsoleteImpact}>
-                      <AlertTriangle className="h-3 w-3 mr-1" />Marquer obsolete
+                      <AlertTriangle className="h-3 w-3 mr-1" />Marquer obsolète
                     </Button>
                   )}
                 </div>
@@ -460,7 +460,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold">Substituts</h3>
-                    <p className="text-[11px] text-muted-foreground">Utilises si ce composant est en rupture</p>
+                    <p className="text-[11px] text-muted-foreground">Utilisés si ce composant est en rupture</p>
                   </div>
                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setAddSubOpen(true); setSubSearch(''); setSelectedSubId(''); setSubNote('') }}>
                     <Plus className="h-3 w-3 mr-1" />Ajouter
@@ -486,7 +486,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                             <button type="button" className="text-sm font-medium text-blue-700 hover:underline cursor-pointer" onClick={() => setNestedId(s.substitut_id)}>
                               {s.substitut_nom}
                             </button>
-                            {s.substitut_statut === 'Obsolète' && <Badge className="ml-1 bg-gray-200 text-gray-700 border-gray-300 text-[9px]">obsolete</Badge>}
+                            {s.substitut_statut === 'Obsolète' && <Badge className="ml-1 bg-gray-200 text-gray-700 border-gray-300 text-[9px]">obsolète</Badge>}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{s.note ?? '—'}</TableCell>
                           <TableCell>
@@ -504,14 +504,14 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
                 {usedAsSubstitut.length > 0 && (
                   <div className="pt-2">
-                    <h3 className="text-sm font-semibold mb-1">Utilise comme substitut de</h3>
+                    <h3 className="text-sm font-semibold mb-1">Utilisé comme substitut de</h3>
                     {usedAsSubstitut.map((u) => (
                       <div key={u.id} className="flex items-center gap-2 text-sm">
                         <span className="text-muted-foreground">·</span>
                         <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={() => setNestedId(u.composant_id)}>
                           {u.composant_nom}
                         </button>
-                        <span className="text-xs text-muted-foreground">(priorite {u.priorite})</span>
+                        <span className="text-xs text-muted-foreground">(priorité {u.priorite})</span>
                       </div>
                     ))}
                   </div>
@@ -522,12 +522,12 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
             {/* ═══ Refs fournisseurs ═══ */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">References fournisseurs</h3>
+                <h3 className="text-sm font-semibold">Références fournisseurs</h3>
                 {!addingRef && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddingRef(true)}><Plus className="h-3 w-3 mr-1" />Ajouter</Button>}
               </div>
               {addingRef && (
                 <div className="flex items-end gap-2">
-                  <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Ref" className="h-8" />
+                  <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Réf" className="h-8" />
                   <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Fournisseur" className="h-8" />
                   <Button size="sm" className="h-8" onClick={handleAddRef}>OK</Button>
                   <Button size="sm" variant="ghost" className="h-8" onClick={() => setAddingRef(false)}><X className="h-3 w-3" /></Button>
@@ -549,7 +549,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                 </Table>
               )}
               {refsFournisseurs.length === 0 && !addingRef && (
-                <p className="text-xs text-muted-foreground">Aucune reference.</p>
+                <p className="text-xs text-muted-foreground">Aucune référence.</p>
               )}
             </div>
           </div>
@@ -577,7 +577,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                   >
                     <span className="font-medium">{c.nom}</span>
                     <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
-                    {c.statut === 'Obsolète' && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolete</Badge>}
+                    {c.statut === 'Obsolète' && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolète</Badge>}
                     {isLoop && <span className="text-[10px] text-red-500 ml-auto">boucle</span>}
                   </button>
                 )
@@ -598,14 +598,14 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
-              Marquer comme obsolete ?
+              Marquer comme obsolète ?
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
-            <p>Marquer <strong>&quot;{produit.nom}&quot;</strong> comme obsolete ?</p>
+            <p>Marquer <strong>&quot;{produit.nom}&quot;</strong> comme obsolète ?</p>
             {bomImpacts.length > 0 ? (
               <>
-                <p className="text-muted-foreground">Ce composant est utilise dans {bomImpacts.length} BOM :</p>
+                <p className="text-muted-foreground">Ce composant est utilisé dans {bomImpacts.length} BOM :</p>
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {bomImpacts.map((b, i) => (
                     <div key={i} className="flex items-center gap-2 rounded border p-2">
@@ -613,7 +613,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                       <span className="font-medium">{b.produit_nom}</span>
                       <span className="text-xs text-muted-foreground">
                         ({b.role === 'principal' ? 'composant principal' : `substitut de "${b.parent_nom}"`}
-                        {b.role === 'principal' && !b.has_substitut && ' — aucun substitut defini'}
+                        {b.role === 'principal' && !b.has_substitut && ' — aucun substitut défini'}
                         {b.role === 'principal' && b.has_substitut && ` — substitut : ${b.substitut_nom}`})
                       </span>
                     </div>
@@ -621,18 +621,18 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                 </div>
                 {bomImpacts.some((b) => b.role === 'principal' && !b.has_substitut) && (
                   <p className="text-amber-700 bg-amber-50 rounded-lg p-2 text-xs">
-                    Les BOM sans substitut seront bloquees a la prochaine fabrication.
+                    Les BOM sans substitut seront bloquées à la prochaine fabrication.
                   </p>
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground">Ce composant n&apos;est utilise dans aucune BOM.</p>
+              <p className="text-muted-foreground">Ce composant n&apos;est utilisé dans aucune BOM.</p>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setObsoleteOpen(false)}>Annuler</Button>
             <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleMarkObsolete} disabled={markingObsolete}>
-              {markingObsolete ? 'En cours...' : 'Marquer comme obsolete'}
+              {markingObsolete ? 'En cours...' : 'Marquer comme obsolète'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -75,7 +75,7 @@ export default function ComposantsPage() {
 
         <label className="flex items-center gap-2 text-sm cursor-pointer">
           <Checkbox checked={showObsolete} onCheckedChange={(v) => setShowObsolete(!!v)} />
-          Afficher les obsoletes
+          Afficher les obsolètes
         </label>
       </div>
 
@@ -99,7 +99,7 @@ export default function ComposantsPage() {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{p.nom}</span>
-                      {p.statut === 'Obsolète' && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolete</Badge>}
+                      {p.statut === 'Obsolète' && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolète</Badge>}
                     </div>
                     {p.description && <div className="text-xs text-muted-foreground truncate max-w-xs">{p.description}</div>}
                   </TableCell>

@@ -284,7 +284,7 @@ export default function FabricationPage() {
       note: subModalAddNote.trim() || null,
     })
     if (error) { toast.error(error.message); return }
-    toast.success('Substitut ajoute')
+    toast.success('Substitut ajouté')
     setSubModalAdding(false)
     setSubModalAddId('')
     setSubModalAddNote('')
@@ -389,9 +389,9 @@ export default function FabricationPage() {
     })
 
     if (errors > 0) {
-      toast.warning(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} terminee avec ${errors} erreur(s)`)
+      toast.warning(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} terminée avec ${errors} erreur(s)`)
     } else {
-      toast.success(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} de ${qty}x ${produits.find((p) => p.id === selectedId)?.nom ?? ''} reussie`)
+      toast.success(`${mode === 'fabrication' ? 'Fabrication' : 'Maintenance'} de ${qty}x ${produits.find((p) => p.id === selectedId)?.nom ?? ''} réussie`)
     }
 
     setLoading(false)
@@ -433,7 +433,7 @@ export default function FabricationPage() {
       cancelled: true, cancelled_at: new Date().toISOString(), cancelled_by: operateur || 'Rafa',
     }).eq('id', cancelItem.id)
 
-    toast.success('Operation annulee — stock readjuste')
+    toast.success('Opération annulée — stock réajusté')
     setCancelling(false)
     setCancelOpen(false)
     loadHistory()
@@ -483,13 +483,13 @@ export default function FabricationPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Quantite</Label>
+                  <Label>Quantité</Label>
                   <Input type="number" min={1} value={quantite} onChange={(e) => setQuantite(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Operateur</Label>
+                  <Label>Opérateur</Label>
                   <Select value={operateur} onValueChange={(v) => setOperateur(v ?? '')}>
-                    <SelectTrigger>{operateur || 'Choisir un operateur'}</SelectTrigger>
+                    <SelectTrigger>{operateur || 'Choisir un opérateur'}</SelectTrigger>
                     <SelectContent>{operateurs.map((o) => (<SelectItem key={o.id} value={o.nom}>{o.nom}</SelectItem>))}</SelectContent>
                   </Select>
                 </div>
@@ -514,15 +514,15 @@ export default function FabricationPage() {
           {/* ═══ Recap table with substitut resolution ═══ */}
           {resolvedLines.length > 0 && (
             <Card>
-              <CardHeader><CardTitle>Recapitulatif</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Récapitulatif</CardTitle></CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10"></TableHead>
                       <TableHead>Composant principal</TableHead>
-                      <TableHead>Substitut utilise</TableHead>
-                      <TableHead>Qte</TableHead>
+                      <TableHead>Substitut utilisé</TableHead>
+                      <TableHead>Qté</TableHead>
                       <TableHead>Statut</TableHead>
                       <TableHead className="w-40"></TableHead>
                     </TableRow>
@@ -558,7 +558,7 @@ export default function FabricationPage() {
                         <TableCell>
                           {l.status === 'orange' && (
                             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
-                              <Settings2 className="h-3 w-3 mr-1" />Gerer substituts
+                              <Settings2 className="h-3 w-3 mr-1" />Gérer substituts
                             </Button>
                           )}
                           {l.status === 'red' && (
@@ -591,7 +591,7 @@ export default function FabricationPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead><TableHead>Mode</TableHead><TableHead>Produit</TableHead>
-                      <TableHead className="text-right">Qte</TableHead><TableHead>Operateur</TableHead>
+                      <TableHead className="text-right">Qté</TableHead><TableHead>Opérateur</TableHead>
                       <TableHead>Statut</TableHead><TableHead className="w-20"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -609,7 +609,7 @@ export default function FabricationPage() {
                         <TableCell>{h.operateur}</TableCell>
                         <TableCell>
                           {h.cancelled
-                            ? <Badge className="bg-red-100 text-red-800 border-red-200 text-[11px]">Annulee</Badge>
+                            ? <Badge className="bg-red-100 text-red-800 border-red-200 text-[11px]">Annulée</Badge>
                             : <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[11px]">OK</Badge>}
                         </TableCell>
                         <TableCell>
@@ -631,15 +631,15 @@ export default function FabricationPage() {
         {/* ═══ Tab: Stats ═══ */}
         <TabsContent value="stats" className="mt-4">
           <Card>
-            <CardHeader><CardTitle>Statistiques par operateur</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Statistiques par opérateur</CardTitle></CardHeader>
             <CardContent>
               {stats.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">Aucune donnee.</p>
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune donnée.</p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Operateur</TableHead>
+                      <TableHead>Opérateur</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                       <TableHead className="text-right">Fabrications</TableHead>
                       <TableHead className="text-right">Maintenances</TableHead>
@@ -665,12 +665,12 @@ export default function FabricationPage() {
       {/* ═══ Dialog: Annuler ═══ */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Annuler cette operation ?</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Annuler cette opération ?</DialogTitle></DialogHeader>
           {cancelItem && (
             <div className="space-y-2 py-2 text-sm">
               <p><strong>{cancelItem.mode === 'fabrication' ? 'Fabrication' : 'Maintenance'}</strong> de <strong>{cancelItem.quantite}x {cancelItem.produit_nom}</strong></p>
               <p className="text-muted-foreground">Par {cancelItem.operateur} le {new Date(cancelItem.created_at).toLocaleDateString('fr-FR')}</p>
-              <p className="text-amber-700 bg-amber-50 rounded-lg p-3 text-sm">Le stock sera automatiquement readjuste.</p>
+              <p className="text-amber-700 bg-amber-50 rounded-lg p-3 text-sm">Le stock sera automatiquement réajusté.</p>
             </div>
           )}
           <DialogFooter>
@@ -688,7 +688,7 @@ export default function FabricationPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             {subModalSubs.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Aucun substitut defini.</p>
+              <p className="text-sm text-muted-foreground text-center py-4">Aucun substitut défini.</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -710,7 +710,7 @@ export default function FabricationPage() {
                             {s.substitut_nom}
                           </button>
                           {s.substitut_statut === 'Obsolète' && (
-                            <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolete</Badge>
+                            <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[10px]">obsolète</Badge>
                           )}
                         </div>
                       </TableCell>
@@ -752,7 +752,7 @@ export default function FabricationPage() {
                       >
                         <span className="font-medium">{c.nom}</span>
                         <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
-                        {c.statut === 'Obsolète' && <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolete</Badge>}
+                        {c.statut === 'Obsolète' && <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px]">obsolète</Badge>}
                       </button>
                     ))
                   )}

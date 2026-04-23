@@ -129,7 +129,7 @@ export function ProductCombobox({
               {filtered.length === 0 ? (
                 <div className="py-4 text-center">
                   <p className="text-sm text-muted-foreground mb-2">
-                    Aucun produit trouve
+                    Aucun produit trouvé
                   </p>
                   <Button
                     size="sm"
@@ -140,7 +140,7 @@ export function ProductCombobox({
                     }}
                   >
                     <Plus className="h-3.5 w-3.5 mr-1" />
-                    Creer un nouveau produit
+                    Créer un nouveau produit
                   </Button>
                 </div>
               ) : (
@@ -188,7 +188,7 @@ export function ProductCombobox({
                 }}
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span className="font-medium">Creer un nouveau produit</span>
+                <span className="font-medium">Créer un nouveau produit</span>
               </button>
             </div>
           </div>,

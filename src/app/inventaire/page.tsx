@@ -48,7 +48,7 @@ interface LigneInventaire {
 }
 
 const FAMILLES_DEFAULT = ['Toutes', 'RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
-const FILTRES_ECART = ['Tous', 'Avec ecart', 'Verifies', 'Non verifies']
+const FILTRES_ECART = ['Tous', 'Avec écart', 'Vérifiés', 'Non vérifiés']
 
 export default function InventairePage() {
   const [lignes, setLignes] = useState<LigneInventaire[]>([])
@@ -120,13 +120,13 @@ export default function InventairePage() {
       )
         return false
     }
-    if (filtreEcart === 'Avec ecart') {
+    if (filtreEcart === 'Avec écart') {
       if (!l.checked) return false
       const constate = parseInt(l.stock_constate, 10)
       return !isNaN(constate) && constate !== l.produit.stock_actuel
     }
-    if (filtreEcart === 'Verifies') return l.checked
-    if (filtreEcart === 'Non verifies') return !l.checked
+    if (filtreEcart === 'Vérifiés') return l.checked
+    if (filtreEcart === 'Non vérifiés') return !l.checked
     return true
   })
 
@@ -139,7 +139,7 @@ export default function InventairePage() {
 
   async function handleApply() {
     if (lignesToApply.length === 0) {
-      toast.info('Aucun ecart a appliquer')
+      toast.info('Aucun écart à appliquer')
       setConfirmOpen(false)
       return
     }
@@ -170,7 +170,7 @@ export default function InventairePage() {
         produit_id: l.produit.id,
         quantite: diff,
         valide_par: operateur,
-        notes: `Inventaire: systeme ${l.produit.stock_actuel} → constate ${constate} (ecart ${diff > 0 ? '+' : ''}${diff})`,
+        notes: `Inventaire: système ${l.produit.stock_actuel} → constaté ${constate} (écart ${diff > 0 ? '+' : ''}${diff})`,
       })
 
       success++
@@ -180,9 +180,9 @@ export default function InventairePage() {
     setConfirmOpen(false)
 
     if (errors > 0) {
-      toast.warning(`${success} ajustement(s) applique(s), ${errors} erreur(s)`)
+      toast.warning(`${success} ajustement(s) appliqué(s), ${errors} erreur(s)`)
     } else {
-      toast.success(`${success} ajustement(s) applique(s)`)
+      toast.success(`${success} ajustement(s) appliqué(s)`)
     }
 
     loadProduits()
@@ -194,17 +194,17 @@ export default function InventairePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inventaire</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Saisissez le stock constate pour chaque produit
+            Saisissez le stock constaté pour chaque produit
           </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-4 text-sm">
             <span className="text-muted-foreground">
-              {verifies}/{totalProduits} verifies
+              {verifies}/{totalProduits} vérifiés
             </span>
             {avecEcart > 0 && (
               <Badge className="bg-amber-100 text-amber-800 border-amber-200">
-                {avecEcart} ecart{avecEcart > 1 ? 's' : ''}
+                {avecEcart} écart{avecEcart > 1 ? 's' : ''}
               </Badge>
             )}
           </div>
@@ -212,7 +212,7 @@ export default function InventairePage() {
             onClick={() => setConfirmOpen(true)}
             disabled={lignesToApply.length === 0}
           >
-            Appliquer les ecarts ({lignesToApply.length})
+            Appliquer les écarts ({lignesToApply.length})
           </Button>
         </div>
       </div>
@@ -259,11 +259,11 @@ export default function InventairePage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Produit</TableHead>
-                <TableHead>Ref interne</TableHead>
+                <TableHead>Réf interne</TableHead>
                 <TableHead>Famille</TableHead>
-                <TableHead className="text-right">Stock systeme</TableHead>
-                <TableHead className="text-right w-32">Stock constate</TableHead>
-                <TableHead className="text-right w-24">Ecart</TableHead>
+                <TableHead className="text-right">Stock système</TableHead>
+                <TableHead className="text-right w-32">Stock constaté</TableHead>
+                <TableHead className="text-right w-24">Écart</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -334,8 +334,8 @@ export default function InventairePage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              {lignesToApply.length} produit{lignesToApply.length > 1 ? 's' : ''} avec ecart
-              {lignesToApply.length > 1 ? 's' : ''} vont etre ajuste{lignesToApply.length > 1 ? 's' : ''}.
+              {lignesToApply.length} produit{lignesToApply.length > 1 ? 's' : ''} avec écart
+              {lignesToApply.length > 1 ? 's' : ''} vont être ajusté{lignesToApply.length > 1 ? 's' : ''}.
             </p>
             <div className="max-h-60 overflow-y-auto space-y-1">
               {lignesToApply.map((l) => {
@@ -363,7 +363,7 @@ export default function InventairePage() {
               })}
             </div>
             <div className="space-y-1.5 pt-2">
-              <label className="text-sm font-medium">Operateur</label>
+              <label className="text-sm font-medium">Opérateur</label>
               <Input
                 value={operateur}
                 onChange={(e) => setOperateur(e.target.value)}

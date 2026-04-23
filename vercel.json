@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/factures/fetch-outlook?sinceHours=24",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

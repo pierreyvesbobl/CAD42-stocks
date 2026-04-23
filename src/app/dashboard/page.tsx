@@ -78,7 +78,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Vue d&apos;ensemble de l&apos;etat du stock
+          Vue d&apos;ensemble de l&apos;état du stock
         </p>
       </div>
 
@@ -122,7 +122,7 @@ export default function DashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nom</TableHead>
-                  <TableHead>Ref interne</TableHead>
+                  <TableHead>Réf interne</TableHead>
                   <TableHead>Famille</TableHead>
                   <TableHead className="text-right">Stock</TableHead>
                   <TableHead className="text-right">Seuil</TableHead>

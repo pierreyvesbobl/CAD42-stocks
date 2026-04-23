@@ -189,7 +189,7 @@ export default function NomenclaturesPage() {
       toast.error(error.message)
       return
     }
-    toast.success('Composant ajoute')
+    toast.success('Composant ajouté')
     setAddOpen(false)
     setAddComposantId('')
     setAddQuantite('1')
@@ -216,7 +216,7 @@ export default function NomenclaturesPage() {
       toast.error(error.message)
       return
     }
-    toast.success('Quantite mise a jour')
+    toast.success('Quantité mise à jour')
     setEditOpen(false)
     loadData()
   }
@@ -230,7 +230,7 @@ export default function NomenclaturesPage() {
       toast.error(error.message)
       return
     }
-    toast.success('Composant retire')
+    toast.success('Composant retiré')
     loadData()
   }
 
@@ -247,7 +247,7 @@ export default function NomenclaturesPage() {
       toast.error(error.message)
       return
     }
-    toast.success('Nomenclature supprimee')
+    toast.success('Nomenclature supprimée')
     setDeleteOpen(false)
     setSelectedProduit(null)
     loadData()
@@ -289,7 +289,7 @@ export default function NomenclaturesPage() {
       return
     }
 
-    toast.success(`Produit fini "${data.nom}" cree`)
+    toast.success(`Produit fini "${data.nom}" créé`)
     setCreateProductOpen(false)
     loadData()
     // Open the new BOM directly
@@ -332,7 +332,7 @@ export default function NomenclaturesPage() {
       return
     }
 
-    toast.success(`Produit "${data.nom}" cree`)
+    toast.success(`Produit "${data.nom}" créé`)
     setCreateProductOpen(false)
 
     // If it's a composant, select it in the add dialog
@@ -400,8 +400,8 @@ export default function NomenclaturesPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Composant</TableHead>
-                    <TableHead>Reference</TableHead>
-                    <TableHead className="text-right">Quantite</TableHead>
+                    <TableHead>Référence</TableHead>
+                    <TableHead className="text-right">Quantité</TableHead>
                     <TableHead className="w-24"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -472,7 +472,7 @@ export default function NomenclaturesPage() {
                     </p>
                     <Button size="sm" variant="outline" onClick={() => openCreateProduct()}>
                       <Plus className="h-3.5 w-3.5 mr-1" />
-                      Creer un nouveau produit
+                      Créer un nouveau produit
                     </Button>
                   </div>
                 ) : (
@@ -496,13 +496,13 @@ export default function NomenclaturesPage() {
                       onClick={() => openCreateProduct()}
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      <span className="font-medium">Creer un nouveau produit</span>
+                      <span className="font-medium">Créer un nouveau produit</span>
                     </button>
                   </>
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>Quantite</Label>
+                <Label>Quantité</Label>
                 <Input
                   type="number"
                   min={1}
@@ -523,14 +523,14 @@ export default function NomenclaturesPage() {
         <Dialog open={editOpen} onOpenChange={setEditOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Modifier la quantite</DialogTitle>
+              <DialogTitle>Modifier la quantité</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <p className="text-sm">
                 Composant: <strong>{editRow?.composant_nom}</strong>
               </p>
               <div className="space-y-1.5">
-                <Label>Quantite</Label>
+                <Label>Quantité</Label>
                 <Input
                   type="number"
                   min={1}
@@ -555,7 +555,7 @@ export default function NomenclaturesPage() {
             </DialogHeader>
             <p className="text-sm text-muted-foreground py-2">
               Supprimer toute la nomenclature de <strong>{selectedProduitData.nom}</strong> ?
-              Tous les composants seront retires. Cette action est irreversible.
+              Tous les composants seront retirés. Cette action est irréversible.
             </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
@@ -570,7 +570,7 @@ export default function NomenclaturesPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5" />
-                {createProductMode === 'produit_fini' ? 'Creer un nouveau produit fini' : 'Creer un nouveau produit'}
+                {createProductMode === 'produit_fini' ? 'Créer un nouveau produit fini' : 'Créer un nouveau produit'}
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
@@ -628,7 +628,7 @@ export default function NomenclaturesPage() {
               <Button variant="outline" onClick={() => setCreateProductOpen(false)}>Annuler</Button>
               <Button onClick={createProductMode === 'produit_fini' ? handleCreateProductFiniAndBom : handleCreateProduct}>
                 <Plus className="h-4 w-4 mr-1" />
-                Creer le produit
+                Créer le produit
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -669,7 +669,7 @@ export default function NomenclaturesPage() {
       {filteredGroups.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            Aucune nomenclature trouvee.
+            Aucune nomenclature trouvée.
           </CardContent>
         </Card>
       ) : (
@@ -704,7 +704,7 @@ export default function NomenclaturesPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
-              Creer un nouveau produit fini
+              Créer un nouveau produit fini
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -744,7 +744,7 @@ export default function NomenclaturesPage() {
             <Button variant="outline" onClick={() => setCreateProductOpen(false)}>Annuler</Button>
             <Button onClick={handleCreateProductFiniAndBom}>
               <Plus className="h-4 w-4 mr-1" />
-              Creer le produit
+              Créer le produit
             </Button>
           </DialogFooter>
         </DialogContent>
