@@ -1,18 +1,5 @@
 import { GoogleGenAI } from '@google/genai'
-import { createSupabaseAdmin } from '@/lib/supabase/server'
-
-async function resolveApiKey(): Promise<string> {
-  const fromEnv = process.env.GEMINI_API_KEY
-  if (fromEnv) return fromEnv
-  const sb = createSupabaseAdmin()
-  const { data } = await sb
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'gemini_api_key')
-    .maybeSingle()
-  if (data?.value) return data.value
-  throw new Error('GEMINI_API_KEY manquant (ni dans env ni dans app_settings)')
-}
+import { requireSetting } from './settings'
 
 export type LigneFacture = {
   ligne: string
@@ -83,7 +70,7 @@ Règles sur les lignes :
 const MODEL = 'gemini-3-pro-preview'
 
 export async function analyzeFacture(pdf: Buffer): Promise<FactureAnalysis> {
-  const apiKey = await resolveApiKey()
+  const apiKey = await requireSetting('gemini_api_key', 'GEMINI_API_KEY', 'Clé API Gemini')
   const ai = new GoogleGenAI({ apiKey })
 
   const response = await ai.models.generateContent({

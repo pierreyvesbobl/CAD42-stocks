@@ -34,10 +34,27 @@ import { toast } from 'sonner'
 
 interface SettingInfo {
   key: string
+  label: string | null
   source: 'env' | 'db' | 'none'
   masked: string | null
+  value: string | null
   set: boolean
   updated_at: string | null
+}
+
+const OUTLOOK_KEYS = [
+  'outlook_tenant_id',
+  'outlook_client_id',
+  'outlook_client_secret',
+  'outlook_mailbox',
+] as const
+type OutlookKey = typeof OUTLOOK_KEYS[number]
+
+const OUTLOOK_META: Record<OutlookKey, { label: string; secret: boolean; placeholder: string }> = {
+  outlook_tenant_id: { label: 'Tenant ID', secret: false, placeholder: '00000000-0000-0000-0000-000000000000' },
+  outlook_client_id: { label: 'Client ID', secret: false, placeholder: '00000000-0000-0000-0000-000000000000' },
+  outlook_client_secret: { label: 'Client Secret', secret: true, placeholder: '•••••••••••••' },
+  outlook_mailbox: { label: 'Boîte mail', secret: false, placeholder: 'facturation@exemple.com' },
 }
 
 interface Operateur {
@@ -65,12 +82,31 @@ export default function ParametresPage() {
   const [settings, setSettings] = useState<SettingInfo[]>([])
   const [geminiInput, setGeminiInput] = useState('')
   const [savingGemini, setSavingGemini] = useState(false)
+  const [outlookInputs, setOutlookInputs] = useState<Record<OutlookKey, string>>({
+    outlook_tenant_id: '',
+    outlook_client_id: '',
+    outlook_client_secret: '',
+    outlook_mailbox: '',
+  })
+  const [savingOutlook, setSavingOutlook] = useState(false)
 
   const loadSettings = useCallback(async () => {
     const res = await fetch('/api/settings')
     if (!res.ok) return
     const data = await res.json()
-    setSettings((data.settings as SettingInfo[]) ?? [])
+    const loaded = (data.settings as SettingInfo[]) ?? []
+    setSettings(loaded)
+    // Préremplir les champs non-secrets d'Outlook avec les valeurs actuelles
+    setOutlookInputs((prev) => {
+      const next = { ...prev }
+      for (const k of OUTLOOK_KEYS) {
+        const s = loaded.find((x) => x.key === k)
+        if (!OUTLOOK_META[k].secret && s?.value) {
+          next[k] = s.value
+        }
+      }
+      return next
+    })
   }, [])
 
   useEffect(() => { loadSettings() }, [loadSettings])
@@ -97,6 +133,66 @@ export default function ParametresPage() {
   }
 
   const geminiSetting = settings.find((s) => s.key === 'gemini_api_key')
+
+  async function handleSaveOutlook() {
+    setSavingOutlook(true)
+    try {
+      // On envoie tous les champs: pour les secrets, une valeur vide signifie
+      // "laisser la valeur actuelle" → on ne remplace que si rempli.
+      // Pour les non-secrets, on envoie toujours la valeur courante.
+      const updates: Array<{ key: OutlookKey; value: string }> = []
+      for (const k of OUTLOOK_KEYS) {
+        const v = outlookInputs[k].trim()
+        if (OUTLOOK_META[k].secret) {
+          if (v) updates.push({ key: k, value: v })
+        } else {
+          updates.push({ key: k, value: v })
+        }
+      }
+      if (updates.length === 0) {
+        toast.info('Aucune modification')
+        return
+      }
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Échec enregistrement Outlook')
+        return
+      }
+      toast.success('Paramètres Outlook enregistrés')
+      // Effacer uniquement les champs secrets (on ne veut pas garder la clé en clair dans le state)
+      setOutlookInputs((prev) => ({
+        ...prev,
+        outlook_client_secret: '',
+      }))
+      loadSettings()
+    } finally {
+      setSavingOutlook(false)
+    }
+  }
+
+  async function handleDeleteOutlookSecret() {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'outlook_client_secret', value: '' }),
+    })
+    if (res.ok) {
+      toast.success('Client Secret supprimé')
+      loadSettings()
+    } else {
+      const data = await res.json()
+      toast.error(data.error ?? 'Échec suppression')
+    }
+  }
+
+  function settingFor(key: string) {
+    return settings.find((s) => s.key === key)
+  }
 
   // ─── Operateurs ───
   const [operateurs, setOperateurs] = useState<Operateur[]>([])
@@ -515,6 +611,85 @@ export default function ParametresPage() {
                   Supprimer la clé enregistrée
                 </Button>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Outlook (Microsoft Graph)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Identifiants de l&apos;application Azure AD utilisée pour récupérer les
+                factures depuis la boîte mail. Permission requise : <code>Mail.Read</code> (Application)
+                avec admin consent.
+              </p>
+              <div className="space-y-3 max-w-xl">
+                {OUTLOOK_KEYS.map((k) => {
+                  const meta = OUTLOOK_META[k]
+                  const s = settingFor(k)
+                  return (
+                    <div key={k} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label>{meta.label}</Label>
+                        <div className="flex items-center gap-2 text-xs">
+                          {s?.set ? (
+                            <>
+                              <span className="text-emerald-700 dark:text-emerald-400">
+                                Configuré
+                              </span>
+                              <span className="text-muted-foreground">
+                                ({s.source === 'env' ? 'env' : 'base'})
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-amber-700 dark:text-amber-400">
+                              Non configuré
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Input
+                        type={meta.secret ? 'password' : 'text'}
+                        value={outlookInputs[k]}
+                        onChange={(e) =>
+                          setOutlookInputs((prev) => ({ ...prev, [k]: e.target.value }))
+                        }
+                        placeholder={
+                          meta.secret && s?.set
+                            ? 'Laisser vide pour conserver la valeur actuelle'
+                            : meta.placeholder
+                        }
+                        autoComplete="off"
+                      />
+                      {meta.secret && s?.masked && (
+                        <div className="font-mono text-xs text-muted-foreground">
+                          Actuel : {s.masked}
+                        </div>
+                      )}
+                      {s?.source === 'env' && (
+                        <p className="text-xs text-muted-foreground">
+                          La variable d&apos;environnement a toujours la priorité sur la
+                          valeur enregistrée ici.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button onClick={handleSaveOutlook} disabled={savingOutlook}>
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Enregistrer
+                </Button>
+                {settingFor('outlook_client_secret')?.source === 'db' && (
+                  <Button variant="outline" onClick={handleDeleteOutlookSecret}>
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    Supprimer le Client Secret enregistré
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

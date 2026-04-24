@@ -1,6 +1,7 @@
 import { ClientSecretCredential } from '@azure/identity'
 import { Client } from '@microsoft/microsoft-graph-client'
 import 'isomorphic-fetch'
+import { requireSetting } from './settings'
 
 type Attachment = {
   id: string
@@ -31,13 +32,12 @@ export type FetchStats = {
   pdfsFound: number
 }
 
-function getGraphClient(): Client {
-  const tenantId = process.env.OUTLOOK_TENANT_ID
-  const clientId = process.env.OUTLOOK_CLIENT_ID
-  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error('OUTLOOK_TENANT_ID / OUTLOOK_CLIENT_ID / OUTLOOK_CLIENT_SECRET manquants')
-  }
+async function getGraphClient(): Promise<Client> {
+  const [tenantId, clientId, clientSecret] = await Promise.all([
+    requireSetting('outlook_tenant_id', 'OUTLOOK_TENANT_ID', 'Tenant ID Outlook'),
+    requireSetting('outlook_client_id', 'OUTLOOK_CLIENT_ID', 'Client ID Outlook'),
+    requireSetting('outlook_client_secret', 'OUTLOOK_CLIENT_SECRET', 'Client Secret Outlook'),
+  ])
 
   const credential = new ClientSecretCredential(tenantId, clientId, clientSecret)
 
@@ -54,10 +54,8 @@ function getGraphClient(): Client {
   })
 }
 
-function mailbox(): string {
-  const mb = process.env.OUTLOOK_MAILBOX
-  if (!mb) throw new Error('OUTLOOK_MAILBOX manquant')
-  return mb
+function mailbox(): Promise<string> {
+  return requireSetting('outlook_mailbox', 'OUTLOOK_MAILBOX', 'Boîte mail Outlook')
 }
 
 export type FetchOptions =
@@ -67,8 +65,7 @@ export type FetchOptions =
 export async function fetchLatestFacturePdfs(
   opts: FetchOptions,
 ): Promise<{ pdfs: OutlookPdf[]; stats: FetchStats }> {
-  const client = getGraphClient()
-  const mb = mailbox()
+  const [client, mb] = await Promise.all([getGraphClient(), mailbox()])
 
   // Graph rejette $filter(hasAttachments) + $orderby — on ordonne par date
   // et on filtre hasAttachments côté client. La dedup (déjà importé) est
