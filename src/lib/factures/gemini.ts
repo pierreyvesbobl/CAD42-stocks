@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai'
-import { requireSetting } from './settings'
 
 export type LigneFacture = {
   ligne: string
@@ -70,7 +69,8 @@ Règles sur les lignes :
 const MODEL = 'gemini-3-pro-preview'
 
 export async function analyzeFacture(pdf: Buffer): Promise<FactureAnalysis> {
-  const apiKey = await requireSetting('gemini_api_key', 'GEMINI_API_KEY', 'Clé API Gemini')
+  const apiKey = process.env.GEMINI_API_KEY?.trim()
+  if (!apiKey) throw new Error('GEMINI_API_KEY manquant')
   const ai = new GoogleGenAI({ apiKey })
 
   const response = await ai.models.generateContent({
