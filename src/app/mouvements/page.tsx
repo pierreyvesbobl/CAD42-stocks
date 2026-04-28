@@ -21,7 +21,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Search, ChevronDown, ChevronRight } from 'lucide-react'
+import { FileText, Search, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
 
@@ -36,6 +36,7 @@ interface Mouvement {
   quantite: number
   source: string
   ref_facture: string | null
+  date_facture: string | null
   valide_par: string | null
   notes: string | null
   produit_id: string | null
@@ -50,10 +51,14 @@ interface GroupedEntry {
   mouvements: Mouvement[]
   // Summary fields for batch
   date: string
+  date_facture: string | null
   description: string
   totalQuantite: number
   operateur: string | null
 }
+
+type SortKey = 'date' | 'date_facture'
+type SortDir = 'asc' | 'desc'
 
 export default function MouvementsPage() {
   const [mouvements, setMouvements] = useState<Mouvement[]>([])
@@ -64,14 +69,18 @@ export default function MouvementsPage() {
   const [total, setTotal] = useState(0)
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
   const [detailModalId, setDetailModalId] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('date')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const loadData = useCallback(() => {
     const sb = createSupabaseClient()
+    const ascending = sortDir === 'asc'
     let query = sb
       .from('mouvements')
       .select('*', { count: 'exact' })
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false })
+      // Tri primaire selon le choix utilisateur, tri secondaire stable sur created_at.
+      .order(sortKey, { ascending, nullsFirst: false })
+      .order('created_at', { ascending })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
     if (typeFilter !== 'Tous') {
@@ -86,7 +95,24 @@ export default function MouvementsPage() {
       setMouvements((data as Mouvement[]) ?? [])
       setTotal(count ?? 0)
     })
-  }, [typeFilter, factureFilter, search, page])
+  }, [typeFilter, factureFilter, search, page, sortKey, sortDir])
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+    setPage(0)
+  }
+
+  function sortIcon(key: SortKey) {
+    if (sortKey !== key) return null
+    return sortDir === 'asc'
+      ? <ArrowUp className="h-3 w-3 inline ml-1" />
+      : <ArrowDown className="h-3 w-3 inline ml-1" />
+  }
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -94,14 +120,11 @@ export default function MouvementsPage() {
   const grouped: GroupedEntry[] = (() => {
     const entries: GroupedEntry[] = []
     const batchMap = new Map<string, Mouvement[]>()
-    const singles: Mouvement[] = []
 
     for (const m of mouvements) {
       if (m.batch_id) {
         if (!batchMap.has(m.batch_id)) batchMap.set(m.batch_id, [])
         batchMap.get(m.batch_id)!.push(m)
-      } else {
-        singles.push(m)
       }
     }
 
@@ -112,12 +135,6 @@ export default function MouvementsPage() {
         processed.add(m.batch_id)
         const batchMovements = batchMap.get(m.batch_id)!
         const mode = batchMovements[0]?.mode ?? null
-
-        // Build summary description
-        const productNames = [...new Set(batchMovements.map((bm) => {
-          const parts = bm.description.split(' — ')
-          return parts.length > 1 ? parts[1] : bm.description
-        }))]
         const modeLabel = mode === 'annulation' ? 'Annulation' : mode === 'maintenance' ? 'Maintenance' : 'Fabrication'
 
         entries.push({
@@ -126,6 +143,7 @@ export default function MouvementsPage() {
           mode,
           mouvements: batchMovements,
           date: batchMovements[0].date,
+          date_facture: batchMovements[0].date_facture,
           description: `${modeLabel} — ${batchMovements.length} mouvements`,
           totalQuantite: batchMovements.reduce((sum, bm) => sum + Math.abs(bm.quantite), 0),
           operateur: batchMovements[0].valide_par,
@@ -137,6 +155,7 @@ export default function MouvementsPage() {
           mode: null,
           mouvements: [m],
           date: m.date,
+          date_facture: m.date_facture,
           description: m.description,
           totalQuantite: m.quantite,
           operateur: m.valide_par,
@@ -217,7 +236,12 @@ export default function MouvementsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8"></TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('date')}>
+                  Date mvt{sortIcon('date')}
+                </TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('date_facture')}>
+                  Date facture{sortIcon('date_facture')}
+                </TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="text-right">Quantité</TableHead>
@@ -227,7 +251,7 @@ export default function MouvementsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {grouped.map((entry, idx) => {
+              {grouped.map((entry) => {
                 if (entry.type === 'batch' && entry.batch_id) {
                   const isExpanded = expandedBatches.has(entry.batch_id)
                   return (
@@ -243,6 +267,7 @@ export default function MouvementsPage() {
                             : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                         </TableCell>
                         <TableCell className="tabular-nums">{entry.date}</TableCell>
+                        <TableCell className="tabular-nums text-muted-foreground">{entry.date_facture ?? '—'}</TableCell>
                         <TableCell>{modeBadge(entry.mode)}</TableCell>
                         <TableCell className="max-w-sm">
                           <span className="font-medium">{entry.description}</span>
@@ -258,6 +283,7 @@ export default function MouvementsPage() {
                         <TableRow key={m.id} className="bg-muted/20">
                           <TableCell></TableCell>
                           <TableCell className="tabular-nums text-muted-foreground">{m.date}</TableCell>
+                          <TableCell className="tabular-nums text-muted-foreground">{m.date_facture ?? '—'}</TableCell>
                           <TableCell className="text-muted-foreground">{m.type}</TableCell>
                           <TableCell className="max-w-sm truncate text-muted-foreground">{m.description}</TableCell>
                           <TableCell className="text-right tabular-nums">{m.quantite}</TableCell>
@@ -295,6 +321,7 @@ export default function MouvementsPage() {
                   <TableRow key={m.id}>
                     <TableCell></TableCell>
                     <TableCell className="tabular-nums">{m.date}</TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">{m.date_facture ?? '—'}</TableCell>
                     <TableCell>{m.type}</TableCell>
                     <TableCell className="max-w-sm truncate">
                       {m.produit_id ? (

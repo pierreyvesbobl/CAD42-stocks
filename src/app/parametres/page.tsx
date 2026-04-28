@@ -29,7 +29,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, Plus, Pencil, Trash2, Sun, Moon, Monitor } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Sun, Moon, Monitor, Bot } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Operateur {
@@ -43,6 +43,15 @@ interface Famille {
   id: string
   nom: string
   created_at: string
+}
+
+interface AgentPrompt {
+  code: string
+  nom: string
+  description: string | null
+  prompt: string
+  modele: string | null
+  updated_at: string
 }
 
 export default function ParametresPage() {
@@ -71,6 +80,14 @@ export default function ParametresPage() {
   const [famDeleteOpen, setFamDeleteOpen] = useState(false)
   const [famToDelete, setFamToDelete] = useState<Famille | null>(null)
 
+  // ─── Stock defaults ───
+  const [defaultSeuil, setDefaultSeuil] = useState('')
+  const [savingSeuil, setSavingSeuil] = useState(false)
+
+  // ─── Agents ───
+  const [agents, setAgents] = useState<AgentPrompt[]>([])
+  const [agentOpen, setAgentOpen] = useState<AgentPrompt | null>(null)
+
   const loadData = useCallback(() => {
     const sb = createSupabaseClient()
     sb.from('operateurs')
@@ -82,6 +99,19 @@ export default function ParametresPage() {
       .select('*')
       .order('nom')
       .then(({ data }) => setFamilles((data as Famille[]) ?? []))
+
+    sb.from('app_settings_public')
+      .select('value')
+      .eq('key', 'default_seuil_alerte')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value != null) setDefaultSeuil(String(data.value))
+      })
+
+    sb.from('agents_prompts')
+      .select('code, nom, description, prompt, modele, updated_at')
+      .order('nom')
+      .then(({ data }) => setAgents((data as AgentPrompt[]) ?? []))
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
@@ -206,6 +236,26 @@ export default function ParametresPage() {
     loadData()
   }
 
+  // ─── Stock default ───
+
+  async function handleSaveDefaultSeuil() {
+    const v = parseInt(defaultSeuil, 10)
+    if (isNaN(v) || v < 0) {
+      toast.error('Valeur invalide')
+      return
+    }
+    setSavingSeuil(true)
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('app_settings_public').upsert({
+      key: 'default_seuil_alerte',
+      value: String(v),
+      updated_at: new Date().toISOString(),
+    })
+    setSavingSeuil(false)
+    if (error) { toast.error(error.message); return }
+    toast.success('Seuil par défaut enregistré')
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <h1 className="text-2xl font-bold">Paramètres</h1>
@@ -214,6 +264,8 @@ export default function ParametresPage() {
         <TabsList>
           <TabsTrigger value="operateurs">Opérateurs</TabsTrigger>
           <TabsTrigger value="familles">Familles</TabsTrigger>
+          <TabsTrigger value="stock">Stock</TabsTrigger>
+          <TabsTrigger value="agents">Agents IA</TabsTrigger>
           <TabsTrigger value="apparence">Apparence</TabsTrigger>
         </TabsList>
 
@@ -343,6 +395,77 @@ export default function ParametresPage() {
           </Card>
         </TabsContent>
 
+        {/* ═══ Stock ═══ */}
+        <TabsContent value="stock" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Seuil d&apos;alerte par défaut</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Valeur appliquée à tout nouveau composant créé (manuellement ou via l&apos;agent de référence).
+                Modifiable individuellement sur chaque fiche composant.
+              </p>
+              <div className="flex items-end gap-2">
+                <div className="space-y-1.5">
+                  <Label>Seuil par défaut</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={defaultSeuil}
+                    onChange={(e) => setDefaultSeuil(e.target.value)}
+                    className="w-32"
+                  />
+                </div>
+                <Button onClick={handleSaveDefaultSeuil} disabled={savingSeuil}>
+                  {savingSeuil ? 'Enregistrement...' : 'Enregistrer'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ═══ Agents IA ═══ */}
+        <TabsContent value="agents" className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Liste des agents IA utilisés dans l&apos;outil. Cliquer pour consulter le prompt en place.
+          </p>
+          {agents.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                Aucun agent enregistré.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {agents.map((a) => (
+                <Card
+                  key={a.code}
+                  className="cursor-pointer hover:border-[#a6cb4d]/50 transition-colors"
+                  onClick={() => setAgentOpen(a)}
+                >
+                  <CardContent className="py-3">
+                    <div className="flex items-start gap-3">
+                      <Bot className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{a.nom}</span>
+                          {a.modele && (
+                            <span className="text-[11px] text-muted-foreground font-mono">{a.modele}</span>
+                          )}
+                        </div>
+                        {a.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
         {/* ═══ Apparence ═══ */}
         <TabsContent value="apparence" className="mt-4 space-y-4">
           <Card>
@@ -456,6 +579,37 @@ export default function ParametresPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setFamDialogOpen(false)}>Annuler</Button>
             <Button onClick={handleSaveFam}>{editingFam ? 'Enregistrer' : 'Ajouter'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Agent prompt */}
+      <Dialog open={!!agentOpen} onOpenChange={(o) => !o && setAgentOpen(null)}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bot className="h-4 w-4" />
+              {agentOpen?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {agentOpen?.description && (
+              <p className="text-sm text-muted-foreground">{agentOpen.description}</p>
+            )}
+            <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+              <div><span className="font-medium">Code :</span> <code>{agentOpen?.code}</code></div>
+              <div><span className="font-medium">Modèle :</span> <code>{agentOpen?.modele ?? '—'}</code></div>
+              <div className="col-span-2"><span className="font-medium">Mis à jour :</span> {agentOpen?.updated_at ? new Date(agentOpen.updated_at).toLocaleString('fr-FR') : '—'}</div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Prompt</Label>
+              <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs font-mono leading-relaxed">
+                {agentOpen?.prompt}
+              </pre>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAgentOpen(null)}>Fermer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

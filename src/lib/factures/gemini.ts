@@ -8,6 +8,8 @@ export type LigneFacture = {
   fournisseur: string | null
   ref_facture: string | null
   date_facture: string | null
+  lot_size?: number | null
+  lot_source?: string | null
 }
 
 export type FactureCategorie =
@@ -39,6 +41,26 @@ prévoyance, assurance, frais bancaires, prestations intellectuelles, loyers...)
 Extrais CHAQUE ligne article physique. Si has_stockable_products = false,
 renvoie lignes: [].
 
+ÉTAPE 3 — RÉSOLUTION DES LOTS / CONDITIONNEMENTS (TRÈS IMPORTANT)
+Si une ligne décrit un conditionnement par lot ("lot de N", "pack de N",
+"boîte de N", "sachet de N", "carton de N", "x N pcs", "N pces/lot"), tu dois
+interpréter le produit comme N UNITÉS du composant unitaire et NON comme
+"1 unité de lot".
+
+Algorithme:
+- lot_size = nombre d'unités contenues dans un lot (ex. "lot de 5" → 5)
+- n_lots  = nombre de lots achetés sur la facture (la quantité affichée)
+- quantite = lot_size × n_lots
+- prix_ht_unitaire = prix unitaire de UN composant individuel
+  (= prix du lot / lot_size). Reste à 2 décimales.
+- ref_detectee = référence du COMPOSANT unitaire (pas du lot)
+- ligne = description NORMALISÉE du composant unitaire, suivie entre parenthèses
+  de la mention du conditionnement source (ex: "Boulon M4 inox tête fraisée
+  (issu de lot de 5)").
+
+Si le lot_size ne peut pas être déterminé avec certitude, ne tente pas la
+décomposition: garde la ligne telle quelle et mets le détail brut dans "ligne".
+
 Retourne UNIQUEMENT un JSON valide, sans markdown, sans commentaire, avec ce format:
 {
   "has_stockable_products": true | false,
@@ -46,25 +68,30 @@ Retourne UNIQUEMENT un JSON valide, sans markdown, sans commentaire, avec ce for
   "raison": "courte justification (max 100 caractères)",
   "lignes": [
     {
-      "ligne": "texte brut de la ligne tel que lu sur la facture",
-      "ref_detectee": "référence article la plus précise possible",
+      "ligne": "description finale (du composant unitaire si lot)",
+      "ref_detectee": "référence article unitaire",
       "quantite": 1,
       "prix_ht_unitaire": 0.00,
       "fournisseur": "nom du fournisseur (en-tête de la facture)",
       "ref_facture": "numéro de facture",
-      "date_facture": "YYYY-MM-DD"
+      "date_facture": "YYYY-MM-DD",
+      "lot_size": null,
+      "lot_source": null
     }
   ]
 }
 
 Règles sur les lignes :
 - quantite et prix_ht_unitaire sont des nombres, pas des strings
+- quantite est TOUJOURS la quantité en unités de composant (jamais en lots)
 - date_facture est au format YYYY-MM-DD
 - fournisseur et ref_facture sont les mêmes pour toutes les lignes d'une même facture
 - N'inclus PAS les lignes de TVA, total, frais de port ou sous-totaux
 - N'inclus que les lignes correspondant à des articles/produits physiques
 - Si une référence article est ambiguë, garde la description complète dans ref_detectee
-- Si un champ est illisible, mets null plutôt qu'inventer`
+- Si un champ est illisible, mets null plutôt qu'inventer
+- lot_size = N si un lot a été décomposé, sinon null
+- lot_source = "lot de 5", "pack de 10", etc. tel que lu sur la facture, sinon null`
 
 const MODEL = 'gemini-3-pro-preview'
 

@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button'
 import { Search, Plus, Pencil, Trash2, ArrowLeft, Package } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
+import { getDefaultSeuilAlerte } from '@/lib/app-settings'
 
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
@@ -269,6 +270,7 @@ export default function NomenclaturesPage() {
     const sb = createSupabaseClient()
     const { data: refData } = await sb.rpc('next_internal_ref')
     const internalRef = (refData as string) ?? `CAD-${Date.now()}`
+    const defaultSeuil = await getDefaultSeuilAlerte()
 
     const { data, error } = await sb
       .from('produits')
@@ -279,7 +281,7 @@ export default function NomenclaturesPage() {
         statut: 'Produit fini',
         prix_ht: parseFloat(newProduct.prix_ht) || 0,
         stock_actuel: 0,
-        seuil_alerte: 0,
+        seuil_alerte: defaultSeuil,
       })
       .select('id, reference, nom')
       .single()
@@ -312,6 +314,7 @@ export default function NomenclaturesPage() {
     const sb = createSupabaseClient()
     const { data: refData } = await sb.rpc('next_internal_ref')
     const internalRef = (refData as string) ?? `CAD-${Date.now()}`
+    const defaultSeuil = await getDefaultSeuilAlerte()
 
     const { data, error } = await sb
       .from('produits')
@@ -322,7 +325,7 @@ export default function NomenclaturesPage() {
         statut: newProduct.statut,
         prix_ht: parseFloat(newProduct.prix_ht) || 0,
         stock_actuel: 0,
-        seuil_alerte: 0,
+        seuil_alerte: defaultSeuil,
       })
       .select('id, reference, nom')
       .single()
@@ -566,7 +569,7 @@ export default function NomenclaturesPage() {
 
         {/* Dialog: Create product */}
         <Dialog open={createProductOpen} onOpenChange={setCreateProductOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5" />
@@ -700,7 +703,7 @@ export default function NomenclaturesPage() {
 
       {/* Dialog: Create product fini */}
       <Dialog open={createProductOpen} onOpenChange={setCreateProductOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />

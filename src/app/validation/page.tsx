@@ -22,7 +22,8 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProductCombobox } from '@/components/product-combobox'
-import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, Mail, Upload, Loader2 } from 'lucide-react'
+import { getDefaultSeuilAlerte } from '@/lib/app-settings'
+import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, Mail, Upload, Loader2, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -42,6 +43,13 @@ interface ValidationRow {
   date_facture: string | null
   pdf_storage_path: string | null
   statut: string | null
+  lot_size: number | null
+  lot_source: string | null
+  suggested_nom: string | null
+  suggested_famille: string | null
+  suggested_description: string | null
+  lien_url: string | null
+  lien_url_source: string | null
 }
 
 interface ProduitOption {
@@ -85,7 +93,7 @@ export default function ValidationPage() {
   const [rejectedImports, setRejectedImports] = useState<FactureRejetee[]>([])
   const [produits, setProduits] = useState<ProduitOption[]>([])
   const [overrides, setOverrides] = useState<
-    Record<string, { produitId: string; quantite: string }>
+    Record<string, { produitId: string; quantite: string; prix: string; ref: string }>
   >({})
 
   const [selectedFacture, setSelectedFacture] = useState<string | null>(null)
@@ -93,7 +101,7 @@ export default function ValidationPage() {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState('a_traiter')
 
-  const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const [editingRowIds, setEditingRowIds] = useState<Set<string>>(new Set())
   const [createOpen, setCreateOpen] = useState(false)
   const [createForRowId, setCreateForRowId] = useState<string | null>(null)
   const [newProduct, setNewProduct] = useState({
@@ -101,6 +109,8 @@ export default function ValidationPage() {
     famille: 'Accessoire',
     statut: 'Composant',
     prix_ht: '',
+    description: '',
+    seuil_alerte: '',
   })
   const [familles, setFamilles] = useState<string[]>(FAMILLES_DEFAULT)
 
@@ -122,16 +132,22 @@ export default function ValidationPage() {
         })) as ValidationRow[]
         setAllRows(items)
 
-        const init: Record<string, { produitId: string; quantite: string }> = {}
-        items.forEach((r) => {
-          if (!init[r.id]) {
-            init[r.id] = {
-              produitId: r.produit_suggere_id ?? '',
-              quantite: String(r.quantite ?? 1),
+        setOverrides((prev) => {
+          const next = { ...prev }
+          items.forEach((r) => {
+            // Garde les valeurs déjà saisies par l'utilisateur ; ne (ré)initialise
+            // que les lignes inconnues du state local.
+            if (!next[r.id]) {
+              next[r.id] = {
+                produitId: r.produit_suggere_id ?? '',
+                quantite: String(r.quantite ?? 1),
+                prix: r.prix_ht_unitaire != null ? String(r.prix_ht_unitaire) : '',
+                ref: r.ref_detectee ?? '',
+              }
             }
-          }
+          })
+          return next
         })
-        setOverrides((prev) => ({ ...prev, ...init }))
       })
 
     sb.from('produits')
@@ -249,8 +265,130 @@ export default function ValidationPage() {
 
   // ─── Actions ───
 
-  function updateOverride(id: string, field: 'produitId' | 'quantite', value: string) {
+  function updateOverride(
+    id: string,
+    field: 'produitId' | 'quantite' | 'prix' | 'ref',
+    value: string,
+  ) {
     setOverrides((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }))
+  }
+
+  // #5 — pré-remplit le prix avec le dernier prix observé pour ce couple
+  // produit / fournisseur, lu sur file_validation. On ne touche pas au prix
+  // si l'utilisateur en a déjà saisi un.
+  async function maybePrefillLastPrice(rowId: string, produitId: string) {
+    if (!produitId) return
+    const row = allRows.find((r) => r.id === rowId)
+    if (!row) return
+    const current = overrides[rowId]?.prix
+    if (current && current !== (row.prix_ht_unitaire != null ? String(row.prix_ht_unitaire) : '')) {
+      // l'utilisateur a déjà tapé une valeur différente du prix initial → on respecte
+      return
+    }
+    const sb = createSupabaseClient()
+    let q = sb
+      .from('file_validation')
+      .select('prix_ht_unitaire, date_facture, created_at')
+      .eq('produit_suggere_id', produitId)
+      .ilike('statut', 'Valid%')
+      .not('prix_ht_unitaire', 'is', null)
+      .order('date_facture', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (row.fournisseur) q = q.eq('fournisseur', row.fournisseur)
+    const { data } = await q.maybeSingle()
+    if (data?.prix_ht_unitaire != null) {
+      updateOverride(rowId, 'prix', String(data.prix_ht_unitaire))
+    }
+  }
+
+  // Persiste les éditions (qté/prix/ref) en base avant validation
+  async function persistRowEdits(row: ValidationRow): Promise<void> {
+    const o = overrides[row.id]
+    if (!o) return
+    const patch: Record<string, unknown> = {}
+    const newQte = parseFloat(o.quantite)
+    if (!isNaN(newQte) && newQte !== row.quantite) patch.quantite = newQte
+    const newPrix = o.prix.trim() === '' ? null : parseFloat(o.prix)
+    if ((newPrix ?? null) !== (row.prix_ht_unitaire ?? null)) patch.prix_ht_unitaire = newPrix
+    const newRef = o.ref.trim() === '' ? null : o.ref.trim()
+    if ((newRef ?? null) !== (row.ref_detectee ?? null)) patch.ref_detectee = newRef
+    if (Object.keys(patch).length === 0) return
+    const sb = createSupabaseClient()
+    await sb.from('file_validation').update(patch).eq('id', row.id)
+  }
+
+  async function handleAddLine() {
+    if (!selectedFacture) return
+    const ref = selectedRows[0]
+    if (!ref) return
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('file_validation').insert({
+      ligne: '(ligne ajoutée manuellement)',
+      ref_detectee: null,
+      quantite: 1,
+      prix_ht_unitaire: null,
+      fournisseur: ref.fournisseur,
+      ref_facture: ref.ref_facture,
+      date_facture: ref.date_facture,
+      pdf_storage_path: ref.pdf_storage_path,
+      confiance_ia: 'Inconnu',
+      statut: 'À valider',
+    })
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success('Ligne ajoutée')
+    loadData()
+  }
+
+  async function handleDeleteLine(rowId: string) {
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('file_validation').delete().eq('id', rowId)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    setOverrides((prev) => {
+      const n = { ...prev }
+      delete n[rowId]
+      return n
+    })
+    toast.success('Ligne supprimée')
+    loadData()
+  }
+
+  // Propage le lien Amazon de la ligne facture vers references_fournisseurs
+  // pour qu'il survive après la validation et soit visible depuis la fiche
+  // composant. Cible: la ref_fournisseurs identifiée par (produit_id + ref_detectee).
+  async function persistSupplierLink(produitId: string, row: ValidationRow) {
+    const refValue = (overrides[row.id]?.ref ?? row.ref_detectee ?? '').trim()
+    if (!row.lien_url || !refValue) return
+    const sb = createSupabaseClient()
+    // upsert manuel: si l'entrée existe, on update; sinon on l'insère.
+    const { data: existing } = await sb
+      .from('references_fournisseurs')
+      .select('id, lien_url')
+      .eq('produit_id', produitId)
+      .eq('reference', refValue)
+      .maybeSingle()
+    if (existing) {
+      if (!existing.lien_url) {
+        await sb
+          .from('references_fournisseurs')
+          .update({ lien_url: row.lien_url, lien_verifie_le: new Date().toISOString() })
+          .eq('id', existing.id)
+      }
+    } else {
+      await sb.from('references_fournisseurs').insert({
+        produit_id: produitId,
+        reference: refValue,
+        fournisseur: row.fournisseur,
+        lien_url: row.lien_url,
+        lien_verifie_le: new Date().toISOString(),
+      })
+    }
   }
 
   async function handleValidate(row: ValidationRow) {
@@ -259,6 +397,7 @@ export default function ValidationPage() {
       toast.error('Sélectionnez un produit')
       return
     }
+    await persistRowEdits(row)
     const sb = createSupabaseClient()
     const { data, error } = await sb.rpc('validate_file_validation', {
       p_validation_id: row.id,
@@ -269,6 +408,7 @@ export default function ValidationPage() {
     if (error) {
       toast.error(error.message)
     } else {
+      await persistSupplierLink(o.produitId, row)
       const res = data as { success: boolean; produit: string; quantite_ajoutee: number }
       toast.success(`+${res.quantite_ajoutee} ${res.produit}`)
       loadData()
@@ -295,6 +435,7 @@ export default function ValidationPage() {
       toast.error('Sélectionnez un produit')
       return
     }
+    await persistRowEdits(row)
     const sb = createSupabaseClient()
 
     // Annuler l'ancien mouvement si la ligne etait validee
@@ -412,14 +553,21 @@ export default function ValidationPage() {
     }
   }
 
-  function openCreateProduct(rowId: string, _refDetectee: string | null) {
+  async function openCreateProduct(rowId: string, _refDetectee: string | null) {
     setCreateForRowId(rowId)
     const row = allRows.find((r) => r.id === rowId)
+    // Pré-remplissage avec la suggestion de l'agent référence (#7) + le seuil
+    // par défaut côté paramètres (#9). Aucun champ ne reste vide à la création
+    // (#8) : le validateur n'a plus qu'à amender.
+    const seuil = await getDefaultSeuilAlerte()
+    const fallbackFamille = familles.length > 0 ? familles[0] : 'Accessoire'
     setNewProduct({
-      nom: '',
-      famille: familles.length > 0 ? familles[0] : 'Accessoire',
+      nom: row?.suggested_nom ?? '',
+      famille: row?.suggested_famille ?? fallbackFamille,
       statut: 'Composant',
       prix_ht: row?.prix_ht_unitaire != null ? String(row.prix_ht_unitaire) : '',
+      description: row?.suggested_description ?? '',
+      seuil_alerte: String(seuil),
     })
     setCreateOpen(true)
   }
@@ -434,6 +582,10 @@ export default function ValidationPage() {
     // Get next internal reference
     const { data: refData } = await sb.rpc('next_internal_ref')
     const internalRef = (refData as string) ?? `CAD-${Date.now()}`
+    const seuilFromForm = parseInt(newProduct.seuil_alerte, 10)
+    const seuilApplied = Number.isFinite(seuilFromForm) && seuilFromForm >= 0
+      ? seuilFromForm
+      : await getDefaultSeuilAlerte()
 
     const { data, error } = await sb
       .from('produits')
@@ -444,7 +596,8 @@ export default function ValidationPage() {
         statut: newProduct.statut,
         prix_ht: parseFloat(newProduct.prix_ht) || 0,
         stock_actuel: 0,
-        seuil_alerte: 0,
+        seuil_alerte: seuilApplied,
+        description: newProduct.description.trim() || null,
       })
       .select('id, reference, nom, description, famille, statut')
       .single()
@@ -456,13 +609,16 @@ export default function ValidationPage() {
 
     const created = data as ProduitOption
 
-    // If there's a detected ref from the invoice, save it as a supplier ref
+    // If there's a detected ref from the invoice, save it as a supplier ref —
+    // avec le lien Amazon trouvé à l'import si disponible (#4).
     const row = allRows.find((r) => r.id === createForRowId)
     if (row?.ref_detectee) {
       await sb.from('references_fournisseurs').insert({
         produit_id: created.id,
         reference: row.ref_detectee,
         fournisseur: row.fournisseur,
+        lien_url: row.lien_url ?? null,
+        lien_verifie_le: row.lien_url ? new Date().toISOString() : null,
       })
     }
 
@@ -505,7 +661,7 @@ export default function ValidationPage() {
 
   if (selectedFacture) {
     return (
-      <div className="space-y-6 max-w-4xl">
+      <div className="space-y-6 max-w-6xl">
         {/* Header */}
         <div className="flex items-center gap-3">
           <Button
@@ -536,13 +692,22 @@ export default function ValidationPage() {
               onClick={() => window.open(pdfUrl, '_blank')}
             >
               <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-              Ouvrir le PDF
+              Plein écran
             </Button>
           )}
         </div>
 
         {/* Lignes — toutes au même endroit, même format */}
         <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Édite les lignes (qté, prix, réf) directement avant de valider. Le bouton + ajoute une ligne manquée par l&apos;agent.
+            </p>
+            <Button size="sm" variant="outline" onClick={handleAddLine}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Ajouter une ligne
+            </Button>
+          </div>
           {selectedRows.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
               Aucune ligne pour cette facture.
@@ -557,7 +722,7 @@ export default function ValidationPage() {
               return (
                 <Card key={r.id} className={isTreated ? 'border-l-4 opacity-50 hover:opacity-100 transition-opacity ' + (isValidated ? 'border-l-emerald-400' : 'border-l-red-400') : ''}>
                   <CardContent className="py-3 space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {isTreated && (
                         <Badge
                           className={cn(
@@ -571,12 +736,32 @@ export default function ValidationPage() {
                         </Badge>
                       )}
                       {confianceBadge(r.confiance_ia)}
+                      {r.lot_size && r.lot_size > 1 && (
+                        <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[11px]">
+                          Lot de {r.lot_size}
+                          {r.lot_source ? ` (${r.lot_source})` : ''}
+                        </Badge>
+                      )}
                       <span className="text-sm">{r.ligne}</span>
                     </div>
 
                     {r.ref_detectee && (
                       <p className="text-xs text-muted-foreground">
                         Réf : <span className="font-mono text-foreground">{r.ref_detectee}</span>
+                        {r.lien_url && (
+                          <>
+                            {' · '}
+                            <a
+                              href={r.lien_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Voir sur Amazon
+                            </a>
+                          </>
+                        )}
                       </p>
                     )}
 
@@ -587,69 +772,123 @@ export default function ValidationPage() {
                       </p>
                     )}
 
-                    {r.confiance_ia === 'Inconnu' && isPending && (
+                    {r.confiance_ia === 'Inconnu' && isPending && r.suggested_nom && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">Nom proposé par l&apos;agent : </span>
+                        <span className="font-medium text-blue-700">{r.suggested_nom}</span>
+                        <button
+                          type="button"
+                          className="ml-2 text-blue-600 hover:underline"
+                          onClick={() => openCreateProduct(r.id, r.ref_detectee)}
+                        >
+                          Créer ce composant
+                        </button>
+                      </p>
+                    )}
+
+                    {r.confiance_ia === 'Inconnu' && isPending && !r.suggested_nom && (
                       <p className="text-xs text-amber-700">
                         Aucune correspondance — sélectionnez ou créez un produit.
                       </p>
                     )}
 
-                    {isTreated && editingRowId !== r.id ? (
+                    {isTreated && !editingRowIds.has(r.id) ? (
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground flex-1 truncate">
                           {produits.find((p) => p.id === (overrides[r.id]?.produitId || r.produit_suggere_id))?.nom ?? '—'}
                           {' '}
                           <span className="tabular-nums">x{overrides[r.id]?.quantite ?? r.quantite ?? 1}</span>
+                          {(overrides[r.id]?.prix || r.prix_ht_unitaire != null) && (
+                            <> · <span className="tabular-nums">{overrides[r.id]?.prix || r.prix_ht_unitaire}€</span></>
+                          )}
                         </span>
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-8"
-                          onClick={() => setEditingRowId(r.id)}
+                          onClick={() => setEditingRowIds((prev) => new Set(prev).add(r.id))}
                         >
                           <Pencil className="h-3.5 w-3.5 mr-1" />
                           Modifier
                         </Button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
-                          <ProductCombobox
-                            products={produits}
-                            selectedId={overrides[r.id]?.produitId ?? ''}
-                            onSelect={(id) => updateOverride(r.id, 'produitId', id)}
-                            onCreateNew={() => openCreateProduct(r.id, r.ref_detectee)}
-                          />
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-5">
+                            <Label className="text-[11px] text-muted-foreground">Produit</Label>
+                            <ProductCombobox
+                              products={produits}
+                              selectedId={overrides[r.id]?.produitId ?? ''}
+                              onSelect={(id) => {
+                                updateOverride(r.id, 'produitId', id)
+                                maybePrefillLastPrice(r.id, id)
+                              }}
+                              onCreateNew={() => openCreateProduct(r.id, r.ref_detectee)}
+                            />
+                          </div>
+                          <div className="col-span-3">
+                            <Label className="text-[11px] text-muted-foreground">Réf détectée</Label>
+                            <Input
+                              className="h-9"
+                              value={overrides[r.id]?.ref ?? ''}
+                              onChange={(e) => updateOverride(r.id, 'ref', e.target.value)}
+                              placeholder="Réf fournisseur"
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            <Label className="text-[11px] text-muted-foreground">Qté</Label>
+                            <Input
+                              type="number"
+                              className="h-9"
+                              value={overrides[r.id]?.quantite ?? String(r.quantite ?? 1)}
+                              onChange={(e) => updateOverride(r.id, 'quantite', e.target.value)}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Label className="text-[11px] text-muted-foreground">Prix HT (€)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="h-9"
+                              value={overrides[r.id]?.prix ?? ''}
+                              onChange={(e) => updateOverride(r.id, 'prix', e.target.value)}
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="col-span-1 flex justify-end">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-9 w-9 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteLine(r.id)}
+                              title="Supprimer la ligne"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                        <Input
-                          type="number"
-                          className="w-20 h-9"
-                          value={overrides[r.id]?.quantite ?? String(r.quantite ?? 1)}
-                          onChange={(e) => updateOverride(r.id, 'quantite', e.target.value)}
-                        />
-                        {r.prix_ht_unitaire != null && (
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">
-                            x {r.prix_ht_unitaire}&euro;
-                          </span>
-                        )}
-                        {isTreated ? (
-                          <>
-                            <Button size="sm" className="h-9" onClick={async () => { await handleRevalidate(r); setEditingRowId(null) }}>
-                              Valider
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-9" onClick={() => { handleReopen(r.id); setEditingRowId(null) }}>
-                              {isRejected ? 'Réouvrir' : 'Rejeter'}
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button size="sm" className="h-9" onClick={() => handleValidate(r)}>
-                              Valider
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-9" onClick={() => handleReject(r.id)}>
-                              Rejeter
-                            </Button>
-                          </>
-                        )}
+                        <div className="flex items-center gap-2 justify-end">
+                          {isTreated ? (
+                            <>
+                              <Button size="sm" className="h-9" onClick={async () => { await handleRevalidate(r); setEditingRowIds((prev) => { const n = new Set(prev); n.delete(r.id); return n }) }}>
+                                Valider
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-9" onClick={() => { handleReopen(r.id); setEditingRowIds((prev) => { const n = new Set(prev); n.delete(r.id); return n }) }}>
+                                {isRejected ? 'Réouvrir' : 'Rejeter'}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button size="sm" className="h-9" onClick={() => handleValidate(r)}>
+                                Valider
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-9" onClick={() => handleReject(r.id)}>
+                                Rejeter
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -659,9 +898,20 @@ export default function ValidationPage() {
           )}
         </div>
 
+        {/* #2 — preview PDF inline (sous les lignes pour garder les contrôles visibles) */}
+        {pdfUrl && (
+          <Card className="overflow-hidden">
+            <iframe
+              src={pdfUrl}
+              title={`Facture ${selectedFacture}`}
+              className="w-full h-[80vh] bg-muted/20"
+            />
+          </Card>
+        )}
+
         {/* Dialog creation produit */}
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5" />
@@ -723,15 +973,39 @@ export default function ValidationPage() {
                   </Select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label>Prix HT unitaire</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={newProduct.prix_ht}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, prix_ht: e.target.value }))
+                    }
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Seuil d&apos;alerte</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={newProduct.seuil_alerte}
+                    onChange={(e) =>
+                      setNewProduct((p) => ({ ...p, seuil_alerte: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
               <div className="space-y-1.5">
-                <Label>Prix HT unitaire</Label>
+                <Label>Description</Label>
                 <Input
-                  type="number"
-                  value={newProduct.prix_ht}
+                  value={newProduct.description}
                   onChange={(e) =>
-                    setNewProduct((p) => ({ ...p, prix_ht: e.target.value }))
+                    setNewProduct((p) => ({ ...p, description: e.target.value }))
                   }
-                  placeholder="0.00"
+                  placeholder="Description technique courte"
                 />
               </div>
             </div>
@@ -829,14 +1103,13 @@ export default function ValidationPage() {
                     key={`amont-${r.id}`}
                     className="cursor-pointer hover:border-[#a6cb4d]/50 transition-colors"
                     onClick={async () => {
-                      const { data, error } = await createSupabaseClient()
-                        .storage.from('factures')
-                        .createSignedUrl(r.pdf_storage_path, 3600)
-                      if (error || !data) {
+                      const res = await fetch(`/api/facture-pdf?storagePath=${encodeURIComponent(r.pdf_storage_path)}`)
+                      if (!res.ok) {
                         toast.error('PDF introuvable')
                         return
                       }
-                      window.open(data.signedUrl, '_blank')
+                      const { url } = await res.json()
+                      window.open(url, '_blank')
                     }}
                   >
                     <CardContent className="py-3">
@@ -847,6 +1120,9 @@ export default function ValidationPage() {
                         </span>
                         <span className="text-sm text-muted-foreground">
                           {r.fournisseur ?? '—'}
+                        </span>
+                        <span className="text-sm tabular-nums text-muted-foreground">
+                          {r.date_facture ?? '—'}
                         </span>
                         <div className="ml-auto flex items-center gap-3">
                           <Badge variant="outline" className="text-xs">

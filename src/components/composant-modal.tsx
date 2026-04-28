@@ -29,7 +29,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StockBadge } from '@/components/stock-badge'
 import {
-  Pencil, Trash2, Plus, X, ArrowUp, ArrowDown, Search, AlertTriangle,
+  Pencil, Trash2, Plus, X, ArrowUp, ArrowDown, Search, AlertTriangle, ExternalLink, Globe,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -40,7 +40,13 @@ interface Produit {
   stock_actuel: number; seuil_alerte: number; prix_ht: number; description: string | null
 }
 
-interface RefFournisseur { id: string; reference: string; fournisseur: string | null }
+interface RefFournisseur {
+  id: string
+  reference: string
+  fournisseur: string | null
+  lien_url: string | null
+  lien_verifie_le: string | null
+}
 
 interface SubstitutRow {
   id: string; composant_id: string; substitut_id: string; priorite: number; note: string | null
@@ -128,7 +134,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
         }
       })
 
-    sb.from('references_fournisseurs').select('id, reference, fournisseur')
+    sb.from('references_fournisseurs').select('id, reference, fournisseur, lien_url, lien_verifie_le')
       .eq('produit_id', composantId).order('created_at')
       .then(({ data }) => setRefsFournisseurs((data as RefFournisseur[]) ?? []))
 
@@ -233,7 +239,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     const sb = createSupabaseClient()
     const { data, error } = await sb.from('references_fournisseurs')
       .insert({ produit_id: produit.id, reference: newRef.reference.trim(), fournisseur: newRef.fournisseur.trim() || null })
-      .select('id, reference, fournisseur').single()
+      .select('id, reference, fournisseur, lien_url, lien_verifie_le').single()
     if (error) { toast.error(error.message); return }
     setRefsFournisseurs((prev) => [...prev, data as RefFournisseur])
     setNewRef({ reference: '', fournisseur: '' })
@@ -244,6 +250,52 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     const sb = createSupabaseClient()
     await sb.from('references_fournisseurs').delete().eq('id', refId)
     setRefsFournisseurs((prev) => prev.filter((r) => r.id !== refId))
+  }
+
+  // Lookup automatique du lien fournisseur (#4) : Amazon en priorité, fallback
+  // best-effort sur autres. La requête côté serveur (route API) évite les CORS
+  // et permet d'avoir un user-agent crédible.
+  async function handleSearchLink(ref: RefFournisseur) {
+    if (!produit) return
+    const tid = toast.loading('Recherche du lien fournisseur...')
+    try {
+      const res = await fetch('/api/factures/supplier-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          nom: produit.nom,
+          prix: produit.prix_ht,
+          fournisseur: ref.fournisseur,
+          produit_id: produit.id,
+          reference: ref.reference,
+        }),
+      })
+      const data = await res.json()
+      toast.dismiss(tid)
+      if (!res.ok) {
+        toast.error(data.error ?? 'Recherche impossible')
+        return
+      }
+      if (!data.match) {
+        toast.info('Aucun lien plausible trouvé')
+        return
+      }
+      // Si Amazon a retourné une page produit identifiée, on persiste et on
+      // affiche le lien. Sinon (lien de recherche pré-remplie), on ouvre la
+      // recherche dans un onglet sans rien enregistrer.
+      if (data.persisted) {
+        setRefsFournisseurs((prev) => prev.map((r) =>
+          r.id === ref.id ? { ...r, lien_url: data.match.url, lien_verifie_le: new Date().toISOString() } : r,
+        ))
+        toast.success('Lien associé')
+      } else {
+        window.open(data.match.url, '_blank')
+        toast.info('Pas de match direct — recherche Amazon ouverte dans un onglet')
+      }
+    } catch (e) {
+      toast.dismiss(tid)
+      toast.error((e as Error).message)
+    }
   }
 
   // ─── Substituts ───
@@ -372,7 +424,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
   return (
     <>
       <Dialog open={open && !nestedId} onOpenChange={(o) => { if (!o) handleClose() }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl w-[min(96vw,64rem)] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <DialogTitle>{produit.nom}</DialogTitle>
@@ -540,6 +592,30 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                       <TableRow key={r.id}>
                         <TableCell className="font-mono text-xs">{r.reference}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{r.fournisseur ?? '—'}</TableCell>
+                        <TableCell className="text-xs">
+                          {r.lien_url ? (
+                            <a
+                              href={r.lien_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Voir
+                            </a>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => handleSearchLink(r)}
+                              title="Rechercher le lien fournisseur"
+                            >
+                              <Globe className="h-3 w-3 mr-1" />
+                              Trouver
+                            </Button>
+                          )}
+                        </TableCell>
                         <TableCell className="w-8">
                           <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleDeleteRef(r.id)}><Trash2 className="h-3 w-3" /></Button>
                         </TableCell>

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { createSupabaseAdmin } from '@/lib/supabase/server'
 import { analyzeFacture } from './gemini'
 import { matchLigne, type CatalogueEntry } from './matcher'
+import { suggestReference, type CatalogueComposant, type ReferenceSuggestion } from './reference-agent'
+import { findSupplierLink } from './supplier-link'
 
 export type ProcessMeta = {
   source: 'outlook' | 'upload'
@@ -115,8 +117,58 @@ export async function processFacturePdf(
   if (catErr) throw new Error(`Catalogue: ${catErr.message}`)
   const catalogue = (catalogueData ?? []) as CatalogueEntry[]
 
-  const rows = analysis.lignes.map(l => {
+  // Catalogue par nom pour l'agent référence (#7) — uniquement composants vivants.
+  const { data: composantsData } = await sb
+    .from('produits')
+    .select('id, nom, reference, famille, statut')
+    .in('statut', ['Composant'])
+  const composants = ((composantsData ?? []) as Array<{
+    id: string; nom: string; reference: string; famille: string | null
+  }>) as CatalogueComposant[]
+
+  const rows = await Promise.all(analysis.lignes.map(async (l) => {
     const m = matchLigne(l.ref_detectee, l.ligne, catalogue)
+    let produitSuggereId = m.id
+    let confiance = m.confiance
+    let suggestion: ReferenceSuggestion | null = null
+
+    // #7 — fallback agent référence : on ne déclenche que si le matcher fuzzy
+    // n'a pas tranché ('Inconnu' ou 'Similaire'). Coût : 1 appel Gemini par ligne
+    // dans ces cas-là.
+    if (confiance !== 'Connu') {
+      try {
+        suggestion = await suggestReference(l, composants)
+        if (suggestion.existing_match_id && suggestion.existing_match_confiance === 'haute') {
+          produitSuggereId = suggestion.existing_match_id
+          confiance = 'Similaire' // confirmé par LLM mais on laisse l'humain valider
+        }
+      } catch {
+        // fallback silencieux: on continue sans suggestion plutôt que de bloquer l'import
+      }
+    }
+
+    // #4 — recherche Amazon automatique à l'import. Mode strict : on n'enregistre
+    // que les matchs hautement plausibles (titre proche + prix cohérent OU
+    // ref_detectee présente dans le titre Amazon). Sinon, lien_url reste null
+    // et l'utilisateur peut relancer manuellement depuis la fiche composant.
+    let lienUrl: string | null = null
+    let lienSource: string | null = null
+    try {
+      const supplierMatch = await findSupplierLink({
+        nom: l.ligne,
+        refDetectee: l.ref_detectee,
+        prix: l.prix_ht_unitaire,
+        fournisseur: l.fournisseur,
+        strict: true,
+      })
+      if (supplierMatch && supplierMatch.confiance === 'haute') {
+        lienUrl = supplierMatch.url
+        lienSource = supplierMatch.source
+      }
+    } catch {
+      // Best-effort: on ignore les erreurs réseau Amazon, l'import doit aboutir.
+    }
+
     return {
       ligne: l.ligne,
       ref_detectee: l.ref_detectee,
@@ -125,12 +177,19 @@ export async function processFacturePdf(
       fournisseur: l.fournisseur,
       ref_facture: l.ref_facture,
       date_facture: l.date_facture,
-      confiance_ia: m.confiance,
-      produit_suggere_id: m.id,
+      confiance_ia: confiance,
+      produit_suggere_id: produitSuggereId,
       statut: 'À valider',
       pdf_storage_path: storagePath,
+      lot_size: l.lot_size ?? null,
+      lot_source: l.lot_source ?? null,
+      suggested_nom: suggestion?.suggested_nom ?? null,
+      suggested_famille: suggestion?.suggested_famille ?? null,
+      suggested_description: suggestion?.suggested_description ?? null,
+      lien_url: lienUrl,
+      lien_url_source: lienSource,
     }
-  })
+  }))
 
   // Cas limite: has_stockable_products=true mais lignes vides (Gemini indécis).
   // On pose un placeholder pour ne pas perdre la facture.
@@ -147,6 +206,13 @@ export async function processFacturePdf(
       produit_suggere_id: null,
       statut: 'À valider',
       pdf_storage_path: storagePath,
+      lot_size: null,
+      lot_source: null,
+      suggested_nom: null,
+      suggested_famille: null,
+      suggested_description: null,
+      lien_url: null,
+      lien_url_source: null,
     })
   }
 
