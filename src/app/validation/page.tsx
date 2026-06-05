@@ -23,8 +23,8 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProductCombobox } from '@/components/product-combobox'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
-import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, Mail, Upload, Loader2, Trash2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { FileText, Plus, Package, ArrowLeft, ExternalLink, Pencil, Mail, Upload, Loader2, Trash2, Copy as CopyIcon } from 'lucide-react'
+import { cn, normSearch } from '@/lib/utils'
 import { toast } from 'sonner'
 
 // ─── Types ───
@@ -217,10 +217,10 @@ export default function ValidationPage() {
 
   const filteredFactures = factures.filter((f) => {
     if (search.trim()) {
-      const s = search.toLowerCase()
+      const s = normSearch(search)
       if (
-        !f.ref_facture.toLowerCase().includes(s) &&
-        !(f.fournisseur ?? '').toLowerCase().includes(s)
+        !normSearch(f.ref_facture).includes(s) &&
+        !normSearch(f.fournisseur).includes(s)
       )
         return false
     }
@@ -340,6 +340,36 @@ export default function ValidationPage() {
       return
     }
     toast.success('Ligne ajoutée')
+    loadData()
+  }
+
+  // Duplique une ligne de facture (statut remis « À valider ») — utile quand
+  // une ligne regroupe plusieurs produits à valider séparément.
+  async function handleDuplicateLine(row: ValidationRow) {
+    const o = overrides[row.id]
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('file_validation').insert({
+      ligne: row.ligne,
+      ref_detectee: o?.ref?.trim() || row.ref_detectee,
+      quantite: parseFloat(o?.quantite ?? '') || row.quantite,
+      prix_ht_unitaire: o?.prix?.trim() ? parseFloat(o.prix) : row.prix_ht_unitaire,
+      fournisseur: row.fournisseur,
+      ref_facture: row.ref_facture,
+      date_facture: row.date_facture,
+      pdf_storage_path: row.pdf_storage_path,
+      confiance_ia: row.confiance_ia,
+      produit_suggere_id: o?.produitId || row.produit_suggere_id,
+      lot_size: row.lot_size,
+      lot_source: row.lot_source,
+      lien_url: row.lien_url,
+      lien_url_source: row.lien_url_source,
+      statut: 'À valider',
+    })
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success('Ligne dupliquée')
     loadData()
   }
 
@@ -815,7 +845,7 @@ export default function ValidationPage() {
                     ) : (
                       <div className="space-y-2">
                         <div className="grid grid-cols-12 gap-2 items-end">
-                          <div className="col-span-5">
+                          <div className="col-span-4">
                             <Label className="text-[11px] text-muted-foreground">Produit</Label>
                             <ProductCombobox
                               products={produits}
@@ -856,7 +886,16 @@ export default function ValidationPage() {
                               placeholder="0.00"
                             />
                           </div>
-                          <div className="col-span-1 flex justify-end">
+                          <div className="col-span-2 flex justify-end">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleDuplicateLine(r)}
+                              title="Dupliquer la ligne"
+                            >
+                              <CopyIcon className="h-4 w-4" />
+                            </Button>
                             <Button
                               size="icon"
                               variant="ghost"

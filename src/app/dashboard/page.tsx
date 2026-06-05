@@ -173,7 +173,7 @@ export default function DashboardPage() {
                 <TableBody>
                   {(showAllAlertes ? alertes : alertes.slice(0, ALERTES_PREVIEW)).map((a) => (
                     <TableRow key={a.id}>
-                      <TableCell className="font-medium">{a.nom}</TableCell>
+                      <TableCell className="font-medium max-w-xl truncate" title={a.nom}>{a.nom}</TableCell>
                       <TableCell className="text-muted-foreground font-mono text-xs">{a.reference}</TableCell>
                       <TableCell className="text-muted-foreground">{a.famille}</TableCell>
                       <TableCell className="text-right">

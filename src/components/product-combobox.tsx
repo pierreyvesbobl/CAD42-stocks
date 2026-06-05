@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Check, ChevronsUpDown, Plus } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, normSearch } from '@/lib/utils'
 
 interface Product {
   id: string
@@ -39,8 +39,8 @@ export function ProductCombobox({
 
   const filtered = search.trim()
     ? products.filter((p) => {
-        const s = search.toLowerCase()
-        return p.nom.toLowerCase().includes(s) || p.reference.toLowerCase().includes(s) || (p.description ?? '').toLowerCase().includes(s)
+        const s = normSearch(search)
+        return normSearch(p.nom).includes(s) || normSearch(p.reference).includes(s) || normSearch(p.description).includes(s)
       })
     : products
 

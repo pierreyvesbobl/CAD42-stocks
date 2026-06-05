@@ -34,6 +34,7 @@ import {
 import { toast } from 'sonner'
 import { Search, Undo2, Factory, Wrench, Plus, Trash2, ArrowUp, ArrowDown, Settings2 } from 'lucide-react'
 import { ComposantModal } from '@/components/composant-modal'
+import { normSearch } from '@/lib/utils'
 
 // ─── Types ───
 
@@ -157,10 +158,31 @@ export default function FabricationPage() {
   // ─── BOM preview + substitut resolution ───
 
   async function resolveSubstituts(bomData: BomPreview[]) {
+    if (bomData.length === 0) { setResolvedLines([]); return }
     const sb = createSupabaseClient()
-    const lines: ResolvedLine[] = []
+    const ids = bomData.map((b) => b.composant_id)
 
-    for (const b of bomData) {
+    // 2 requêtes batchées au lieu de 2 par composant — la sélection d'un
+    // produit fini était sinon très lente sur les grosses BOM.
+    const [prodsRes, subsRes] = await Promise.all([
+      sb.from('produits').select('id, statut').in('id', ids),
+      sb.from('substituts')
+        .select('composant_id, substitut_id, priorite, substitut:substitut_id(nom, reference, statut, stock_actuel)')
+        .in('composant_id', ids)
+        .order('priorite'),
+    ])
+
+    const statutById = new Map(
+      ((prodsRes.data ?? []) as { id: string; statut: string }[]).map((p) => [p.id, p.statut])
+    )
+    const subsByComposant = new Map<string, { substitut_id: string; substitut: unknown }[]>()
+    for (const s of ((subsRes.data ?? []) as { composant_id: string; substitut_id: string; substitut: unknown }[])) {
+      const list = subsByComposant.get(s.composant_id) ?? []
+      list.push(s)
+      subsByComposant.set(s.composant_id, list)
+    }
+
+    const lines: ResolvedLine[] = bomData.map((b) => {
       const line: ResolvedLine = {
         composant_id: b.composant_id, composant_nom: b.nom, composant_ref: b.reference,
         quantite_necessaire: b.quantite_necessaire, stock_actuel: b.stock_actuel,
@@ -168,9 +190,7 @@ export default function FabricationPage() {
         is_substitut: false, checked: mode === 'fabrication',
       }
 
-      // Check if component is obsolete
-      const { data: compData } = await sb.from('produits').select('statut').eq('id', b.composant_id).single()
-      const isObsolete = compData?.statut === 'Obsolète'
+      const isObsolete = statutById.get(b.composant_id) === 'Obsolète'
 
       // In fabrication mode, obsolete components must use substituts
       // In maintenance mode, obsolete components are usable
@@ -181,16 +201,10 @@ export default function FabricationPage() {
       if (!needsSubstitut) {
         line.status = isObsolete && mode === 'maintenance' ? 'orange' : 'green'
       } else {
-        // Try substituts
-        const { data: subs } = await sb
-          .from('substituts')
-          .select('id, substitut_id, priorite, note, substitut:substitut_id(nom, reference, statut, stock_actuel)')
-          .eq('composant_id', b.composant_id)
-          .order('priorite')
-
+        // Try substituts (déjà triés par priorité)
         let found = false
-        for (const s of (subs ?? [])) {
-          const sub = s.substitut as unknown as { nom: string; reference: string; statut: string; stock_actuel: number } | null
+        for (const s of (subsByComposant.get(b.composant_id) ?? [])) {
+          const sub = s.substitut as { nom: string; reference: string; statut: string; stock_actuel: number } | null
           if (!sub) continue
           if (sub.stock_actuel >= b.quantite_necessaire) {
             line.status = 'orange'
@@ -207,8 +221,8 @@ export default function FabricationPage() {
         }
       }
 
-      lines.push(line)
-    }
+      return line
+    })
 
     setResolvedLines(lines)
   }
@@ -233,6 +247,15 @@ export default function FabricationPage() {
   function toggleLine(composantId: string) {
     setResolvedLines((prev) => prev.map((l) =>
       l.composant_id === composantId ? { ...l, checked: !l.checked } : l
+    ))
+  }
+
+  // Tout cocher / décocher (les lignes rouges restent décochées)
+  const selectableLines = resolvedLines.filter((l) => l.status !== 'red')
+  const allChecked = selectableLines.length > 0 && selectableLines.every((l) => l.checked)
+  function toggleAll(checked: boolean) {
+    setResolvedLines((prev) => prev.map((l) =>
+      l.status === 'red' ? l : { ...l, checked }
     ))
   }
 
@@ -327,8 +350,8 @@ export default function FabricationPage() {
     if (c.id === subModalComposantId) return false
     if (subModalSubs.some((s) => s.substitut_id === c.id)) return false
     if (!subModalAddSearch.trim()) return true
-    const s = subModalAddSearch.toLowerCase()
-    return c.nom.toLowerCase().includes(s) || c.reference.toLowerCase().includes(s)
+    const s = normSearch(subModalAddSearch)
+    return normSearch(c.nom).includes(s) || normSearch(c.reference).includes(s)
   })
 
   // ─── Launch fabrication ───
@@ -441,8 +464,8 @@ export default function FabricationPage() {
 
   const filteredHistory = history.filter((h) => {
     if (!historySearch.trim()) return true
-    const s = historySearch.toLowerCase()
-    return h.produit_nom.toLowerCase().includes(s) || h.operateur.toLowerCase().includes(s) || h.mode.toLowerCase().includes(s)
+    const s = normSearch(historySearch)
+    return normSearch(h.produit_nom).includes(s) || normSearch(h.operateur).includes(s) || normSearch(h.mode).includes(s)
   })
 
   // ─── Render ───
@@ -519,7 +542,13 @@ export default function FabricationPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10"></TableHead>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allChecked}
+                          onCheckedChange={(v) => toggleAll(!!v)}
+                          title={allChecked ? 'Tout décocher' : 'Tout cocher'}
+                        />
+                      </TableHead>
                       <TableHead>Composant principal</TableHead>
                       <TableHead>Substitut utilisé</TableHead>
                       <TableHead>Qté</TableHead>

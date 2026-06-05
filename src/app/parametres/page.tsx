@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Search, Plus, Pencil, Trash2, Sun, Moon, Monitor, Bot } from 'lucide-react'
+import { normSearch } from '@/lib/utils'
 import { toast } from 'sonner'
 
 interface Operateur {
@@ -120,8 +121,8 @@ export default function ParametresPage() {
 
   const filteredOps = operateurs.filter((o) => {
     if (!opSearch.trim()) return true
-    const s = opSearch.toLowerCase()
-    return o.nom.toLowerCase().includes(s) || (o.email ?? '').toLowerCase().includes(s)
+    const s = normSearch(opSearch)
+    return normSearch(o.nom).includes(s) || normSearch(o.email).includes(s)
   })
 
   function openAddOp() {
@@ -177,7 +178,7 @@ export default function ParametresPage() {
 
   const filteredFams = familles.filter((f) => {
     if (!famSearch.trim()) return true
-    return f.nom.toLowerCase().includes(famSearch.toLowerCase())
+    return normSearch(f.nom).includes(normSearch(famSearch))
   })
 
   function openAddFam() {

@@ -32,6 +32,7 @@ import {
   Pencil, Trash2, Plus, X, ArrowUp, ArrowDown, Search, AlertTriangle, ExternalLink, Globe,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { normSearch } from '@/lib/utils'
 
 // ─── Types ───
 
@@ -69,6 +70,21 @@ interface ComposantOption { id: string; reference: string; nom: string; statut: 
 
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const STATUTS = ['Composant', 'Produit fini', 'Location', 'Obsolète']
+
+// ─── Lien fournisseur effectif ───
+// Faute de champ dédié, les URLs fournisseur sont souvent collées dans les
+// champs réf/fournisseur. Ces URLs fournies à la main sont plus fiables que le
+// lien trouvé par l'agent Amazon (qui peut cibler un produit voisin) : on les
+// prend en priorité, et « Trouver » ne sert que s'il n'y a aucun lien.
+
+function asUrl(s: string | null): string | null {
+  const t = s?.trim() ?? ''
+  return /^https?:\/\//i.test(t) ? t : null
+}
+
+function refLienUrl(r: RefFournisseur): string | null {
+  return asUrl(r.reference) ?? asUrl(r.fournisseur) ?? asUrl(r.lien_url)
+}
 
 // ─── Props ───
 
@@ -112,6 +128,11 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
   const [obsoleteOpen, setObsoleteOpen] = useState(false)
   const [bomImpacts, setBomImpacts] = useState<BomImpact[]>([])
   const [markingObsolete, setMarkingObsolete] = useState(false)
+
+  // Delete dialog
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteImpact, setDeleteImpact] = useState({ boms: 0, mouvements: 0, validations: 0, fabrications: 0 })
+  const [deleting, setDeleting] = useState(false)
 
   // Nested modal for clicking on substitut names
   const [nestedId, setNestedId] = useState<string | null>(null)
@@ -257,6 +278,13 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
   // et permet d'avoir un user-agent crédible.
   async function handleSearchLink(ref: RefFournisseur) {
     if (!produit) return
+    // Un lien existe déjà (fourni ou trouvé) : on l'ouvre directement, pas de
+    // recherche Amazon.
+    const existing = refLienUrl(ref)
+    if (existing) {
+      window.open(existing, '_blank')
+      return
+    }
     const tid = toast.loading('Recherche du lien fournisseur...')
     try {
       const res = await fetch('/api/factures/supplier-link', {
@@ -308,8 +336,8 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     if (!composantId || c.id === composantId) return false
     if (substituts.some((s) => s.substitut_id === c.id)) return false
     if (!subSearch.trim()) return true
-    const s = subSearch.toLowerCase()
-    return c.nom.toLowerCase().includes(s) || c.reference.toLowerCase().includes(s)
+    const s = normSearch(subSearch)
+    return normSearch(c.nom).includes(s) || normSearch(c.reference).includes(s)
   })
 
   async function handleAddSubstitut() {
@@ -408,6 +436,58 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     toast.success(`${produit.nom} marqué comme obsolète`)
   }
 
+  // ─── Delete ───
+
+  // Mesure l'impact avant suppression. Les BOM bloquent (FK RESTRICT) ;
+  // l'historique (mouvements, validations, fabrications) sera détaché.
+  async function analyzeDeleteImpact() {
+    if (!produit) return
+    const sb = createSupabaseClient()
+    const [bomRes, mouvRes, valRes, fabRes] = await Promise.all([
+      sb.from('nomenclatures').select('id', { count: 'exact', head: true }).eq('composant_id', produit.id),
+      sb.from('mouvements').select('id', { count: 'exact', head: true }).eq('produit_id', produit.id),
+      sb.from('file_validation').select('id', { count: 'exact', head: true }).eq('produit_suggere_id', produit.id),
+      sb.from('fabrication_history').select('id', { count: 'exact', head: true }).eq('produit_id', produit.id),
+    ])
+    setDeleteImpact({
+      boms: bomRes.count ?? 0,
+      mouvements: mouvRes.count ?? 0,
+      validations: valRes.count ?? 0,
+      fabrications: fabRes.count ?? 0,
+    })
+    setDeleteOpen(true)
+  }
+
+  async function handleDelete() {
+    if (!produit) return
+    setDeleting(true)
+    const sb = createSupabaseClient()
+    // Détache l'historique (conservé, mais sans lien produit) — les FK sans
+    // ON DELETE bloqueraient la suppression sinon.
+    if (deleteImpact.mouvements > 0) {
+      await sb.from('mouvements').update({ produit_id: null }).eq('produit_id', produit.id)
+    }
+    if (deleteImpact.validations > 0) {
+      await sb.from('file_validation').update({ produit_suggere_id: null }).eq('produit_suggere_id', produit.id)
+    }
+    if (deleteImpact.fabrications > 0) {
+      await sb.from('fabrication_history').update({ produit_id: null }).eq('produit_id', produit.id)
+    }
+    // Substituts et références fournisseurs partent en cascade.
+    const { error } = await sb.from('produits').delete().eq('id', produit.id)
+    setDeleting(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success(`"${produit.nom}" supprimé`)
+    setDeleteOpen(false)
+    // Pas via setDirty + handleClose : le state ne serait pas encore propagé
+    // et onChanged ne serait jamais appelé.
+    onChanged?.()
+    onClose()
+  }
+
   // ─── Render ───
 
   if (!produit) {
@@ -495,6 +575,9 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                       <AlertTriangle className="h-3 w-3 mr-1" />Marquer obsolète
                     </Button>
                   )}
+                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive ml-auto" onClick={analyzeDeleteImpact}>
+                    <Trash2 className="h-3 w-3 mr-1" />Supprimer
+                  </Button>
                 </div>
                 <div className="flex items-end gap-2 pt-2 border-t">
                   <div>
@@ -588,14 +671,18 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
               {refsFournisseurs.length > 0 && (
                 <Table>
                   <TableBody>
-                    {refsFournisseurs.map((r) => (
+                    {refsFournisseurs.map((r) => {
+                      const lien = refLienUrl(r)
+                      return (
                       <TableRow key={r.id}>
-                        <TableCell className="font-mono text-xs">{r.reference}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.fournisseur ?? '—'}</TableCell>
+                        <TableCell className="font-mono text-xs max-w-48 truncate" title={r.reference}>{r.reference}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground max-w-48 truncate" title={r.fournisseur ?? undefined}>
+                          {asUrl(r.fournisseur) ? new URL(asUrl(r.fournisseur)!).hostname : r.fournisseur ?? '—'}
+                        </TableCell>
                         <TableCell className="text-xs">
-                          {r.lien_url ? (
+                          {lien ? (
                             <a
-                              href={r.lien_url}
+                              href={lien}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 text-blue-600 hover:underline"
@@ -620,7 +707,8 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                           <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleDeleteRef(r.id)}><Trash2 className="h-3 w-3" /></Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      )
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -709,6 +797,70 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
             <Button variant="outline" onClick={() => setObsoleteOpen(false)}>Annuler</Button>
             <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleMarkObsolete} disabled={markingObsolete}>
               {markingObsolete ? 'En cours...' : 'Marquer comme obsolète'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Delete confirmation dialog ═══ */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Supprimer ce produit ?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            {deleteImpact.boms > 0 ? (
+              <>
+                <p>
+                  <strong>&quot;{produit.nom}&quot;</strong> est utilisé comme composant dans{' '}
+                  <strong>{deleteImpact.boms} nomenclature{deleteImpact.boms > 1 ? 's' : ''}</strong>.
+                </p>
+                <p className="text-red-700 bg-red-50 rounded-lg p-3">
+                  Suppression impossible : retirez-le d&apos;abord de ces nomenclatures,
+                  ou marquez-le obsolète pour le sortir du flux sans perdre l&apos;historique.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Supprimer définitivement <strong>&quot;{produit.nom}&quot;</strong> ({produit.reference}) ?
+                  Cette action est irréversible.
+                </p>
+                {(deleteImpact.mouvements > 0 || deleteImpact.validations > 0 || deleteImpact.fabrications > 0) && (
+                  <div className="text-muted-foreground space-y-1">
+                    <p>Sera conservé mais détaché de ce produit :</p>
+                    <ul className="list-disc pl-5">
+                      {deleteImpact.mouvements > 0 && <li>{deleteImpact.mouvements} mouvement{deleteImpact.mouvements > 1 ? 's' : ''} de stock</li>}
+                      {deleteImpact.validations > 0 && <li>{deleteImpact.validations} ligne{deleteImpact.validations > 1 ? 's' : ''} de facture</li>}
+                      {deleteImpact.fabrications > 0 && <li>{deleteImpact.fabrications} fabrication{deleteImpact.fabrications > 1 ? 's' : ''}</li>}
+                    </ul>
+                  </div>
+                )}
+                {(substituts.length > 0 || refsFournisseurs.length > 0) && (
+                  <p className="text-muted-foreground">
+                    Seront supprimés avec lui :{' '}
+                    {[
+                      refsFournisseurs.length > 0 ? `${refsFournisseurs.length} référence(s) fournisseur` : null,
+                      substituts.length > 0 ? `${substituts.length} lien(s) de substitut` : null,
+                    ].filter(Boolean).join(', ')}.
+                  </p>
+                )}
+                {usedAsSubstitut.length > 0 && (
+                  <p className="text-amber-700 bg-amber-50 rounded-lg p-3">
+                    Attention : ce composant est le substitut de{' '}
+                    {usedAsSubstitut.map((u) => `"${u.composant_nom}"`).join(', ')} — ce{usedAsSubstitut.length > 1 ? 's' : ''} lien{usedAsSubstitut.length > 1 ? 's' : ''} ser{usedAsSubstitut.length > 1 ? 'ont' : 'a'} supprimé{usedAsSubstitut.length > 1 ? 's' : ''}.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting || deleteImpact.boms > 0}>
+              {deleting ? 'Suppression...' : 'Supprimer définitivement'}
             </Button>
           </DialogFooter>
         </DialogContent>

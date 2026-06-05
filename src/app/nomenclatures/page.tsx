@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -27,9 +28,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2, ArrowLeft, Package } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, ArrowLeft, Package, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
+import { normSearch } from '@/lib/utils'
+import { duplicateProduit } from '@/lib/duplicate-produit'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
 
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
@@ -60,12 +63,30 @@ interface BomGroup {
   lignes: NomRow[]
 }
 
-export default function NomenclaturesPage() {
+function NomenclaturesContent() {
+  const router = useRouter()
+  // La BOM ouverte vit dans l'URL (?bom=...) : recliquer sur « Nomenclatures »
+  // dans la nav (href /nomenclatures) ramène donc à la liste, et le bouton
+  // retour navigateur fonctionne aussi.
+  const searchParams = useSearchParams()
+  const selectedProduit = searchParams.get('bom')
   const [produitsFinis, setProduitsFinis] = useState<ProduitFini[]>([])
   const [composants, setComposants] = useState<Composant[]>([])
   const [nomenclatures, setNomenclatures] = useState<NomRow[]>([])
   const [search, setSearch] = useState('')
-  const [selectedProduit, setSelectedProduit] = useState<string | null>(null)
+
+  function openBom(produitId: string) {
+    router.push(`/nomenclatures?bom=${produitId}`)
+  }
+
+  function closeBom() {
+    router.push('/nomenclatures')
+  }
+
+  // Retour en haut à chaque changement de vue (le scroll est porté par <main>)
+  useEffect(() => {
+    document.querySelector('main')?.scrollTo({ top: 0 })
+  }, [selectedProduit])
 
   // Add component dialog
   const [addOpen, setAddOpen] = useState(false)
@@ -84,6 +105,10 @@ export default function NomenclaturesPage() {
 
   // Component detail modal
   const [detailModalId, setDetailModalId] = useState<string | null>(null)
+
+  // Duplicate BOM confirmation
+  const [dupProduit, setDupProduit] = useState<ProduitFini | null>(null)
+  const [duplicating, setDuplicating] = useState(false)
 
   // Create product dialog
   const [createProductOpen, setCreateProductOpen] = useState(false)
@@ -145,11 +170,11 @@ export default function NomenclaturesPage() {
 
   const filteredGroups = groups.filter((g) => {
     if (!search.trim()) return true
-    const s = search.toLowerCase()
+    const s = normSearch(search)
     return (
-      g.produit.nom.toLowerCase().includes(s) ||
-      g.produit.reference.toLowerCase().includes(s) ||
-      g.lignes.some((l) => l.composant_nom.toLowerCase().includes(s))
+      normSearch(g.produit.nom).includes(s) ||
+      normSearch(g.produit.reference).includes(s) ||
+      g.lignes.some((l) => normSearch(l.composant_nom).includes(s))
     )
   })
 
@@ -174,8 +199,8 @@ export default function NomenclaturesPage() {
     // Exclude already added
     if (selectedLignes.some((l) => l.composant_id === c.id)) return false
     if (!addSearch.trim()) return true
-    const s = addSearch.toLowerCase()
-    return c.nom.toLowerCase().includes(s) || c.reference.toLowerCase().includes(s)
+    const s = normSearch(addSearch)
+    return normSearch(c.nom).includes(s) || normSearch(c.reference).includes(s)
   })
 
   async function handleAddComponent() {
@@ -250,7 +275,7 @@ export default function NomenclaturesPage() {
     }
     toast.success('Nomenclature supprimée')
     setDeleteOpen(false)
-    setSelectedProduit(null)
+    closeBom()
     loadData()
   }
 
@@ -295,7 +320,25 @@ export default function NomenclaturesPage() {
     setCreateProductOpen(false)
     loadData()
     // Open the new BOM directly
-    setSelectedProduit(data.id)
+    openBom(data.id)
+  }
+
+  // ─── Duplicate BOM ───
+
+  // Duplique le produit fini + sa nomenclature, puis ouvre la copie.
+  async function handleConfirmDuplicateBom() {
+    if (!dupProduit) return
+    setDuplicating(true)
+    try {
+      const created = await duplicateProduit(dupProduit.id, { withBom: true })
+      toast.success(`"${created.nom}" créé (BOM copiée)`)
+      setDupProduit(null)
+      loadData()
+      openBom(created.id)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+    setDuplicating(false)
   }
 
   // ─── Create product ───
@@ -356,7 +399,7 @@ export default function NomenclaturesPage() {
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            onClick={() => setSelectedProduit(null)}
+            onClick={closeBom}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -681,7 +724,7 @@ export default function NomenclaturesPage() {
             <Card
               key={g.produit.id}
               className="cursor-pointer hover:border-[#a6cb4d]/50 transition-colors"
-              onClick={() => setSelectedProduit(g.produit.id)}
+              onClick={() => openBom(g.produit.id)}
             >
               <CardContent className="py-3">
                 <div className="flex items-center gap-4">
@@ -694,6 +737,15 @@ export default function NomenclaturesPage() {
                   <span className="text-sm text-muted-foreground">
                     {g.lignes.length} composant{g.lignes.length > 1 ? 's' : ''}
                   </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    title="Dupliquer cette nomenclature"
+                    onClick={(e) => { e.stopPropagation(); setDupProduit(g.produit) }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -752,6 +804,34 @@ export default function NomenclaturesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: confirmation duplication BOM */}
+      <Dialog open={!!dupProduit} onOpenChange={(o) => { if (!o) setDupProduit(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Dupliquer cette nomenclature ?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Un nouveau produit fini <strong>&quot;{dupProduit?.nom} (copie)&quot;</strong> sera créé
+            avec une nouvelle référence interne, un stock à 0 et tous les composants
+            de la nomenclature. Elle s&apos;ouvrira pour l&apos;éditer.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDupProduit(null)}>Annuler</Button>
+            <Button onClick={handleConfirmDuplicateBom} disabled={duplicating}>
+              <Copy className="h-3.5 w-3.5 mr-1.5" />
+              {duplicating ? 'Duplication...' : 'Dupliquer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  )
+}
+
+// useSearchParams impose une frontière Suspense au prerender.
+export default function NomenclaturesPage() {
+  return (
+    <Suspense>
+      <NomenclaturesContent />
+    </Suspense>
   )
 }

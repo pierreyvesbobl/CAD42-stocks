@@ -28,7 +28,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { cn, normSearch } from '@/lib/utils'
 import { toast } from 'sonner'
 import { CheckCircle, AlertTriangle, Search } from 'lucide-react'
 
@@ -49,10 +49,12 @@ interface LigneInventaire {
 
 const FAMILLES_DEFAULT = ['Toutes', 'RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const FILTRES_ECART = ['Tous', 'Avec écart', 'Vérifiés', 'Non vérifiés']
+const STATUTS_FILTRE = ['Tous', 'Composant', 'Produit fini', 'Location', 'Obsolète']
 
 export default function InventairePage() {
   const [lignes, setLignes] = useState<LigneInventaire[]>([])
   const [famille, setFamille] = useState('Toutes')
+  const [statut, setStatut] = useState('Tous')
   const [filtreEcart, setFiltreEcart] = useState('Tous')
   const [search, setSearch] = useState('')
   const [operateur, setOperateur] = useState('Rafa')
@@ -112,11 +114,12 @@ export default function InventairePage() {
   // Filtered view
   const filtered = lignes.filter((l) => {
     if (famille !== 'Toutes' && l.produit.famille !== famille) return false
+    if (statut !== 'Tous' && l.produit.statut !== statut) return false
     if (search.trim()) {
-      const s = search.toLowerCase()
+      const s = normSearch(search)
       if (
-        !l.produit.nom.toLowerCase().includes(s) &&
-        !l.produit.reference.toLowerCase().includes(s)
+        !normSearch(l.produit.nom).includes(s) &&
+        !normSearch(l.produit.reference).includes(s)
       )
         return false
     }
@@ -227,6 +230,16 @@ export default function InventairePage() {
             className="pl-9"
           />
         </div>
+        <Select value={statut} onValueChange={(v) => setStatut(v ?? 'Tous')}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Statut" />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUTS_FILTRE.map((s) => (
+              <SelectItem key={s} value={s}>{s === 'Tous' ? 'Tous statuts' : s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={famille} onValueChange={(v) => setFamille(v ?? 'Toutes')}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Famille" />
@@ -280,7 +293,7 @@ export default function InventairePage() {
                       hasValue && ecart !== 0 && 'bg-amber-50/50'
                     )}
                   >
-                    <TableCell className="font-medium">{l.produit.nom}</TableCell>
+                    <TableCell className="font-medium max-w-xl truncate" title={l.produit.nom}>{l.produit.nom}</TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
                       {l.produit.reference}
                     </TableCell>

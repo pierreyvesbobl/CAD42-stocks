@@ -122,7 +122,7 @@ export default function CataloguePage() {
                   onClick={() => router.push(`/catalogue/${p.id}`)}
                 >
                   <TableCell>
-                    <div className="font-medium">{p.nom}</div>
+                    <div className="font-medium max-w-xl truncate" title={p.nom}>{p.nom}</div>
                     {p.description && (
                       <div className="text-xs text-muted-foreground truncate max-w-xs">{p.description}</div>
                     )}
