@@ -201,18 +201,20 @@ export default function ParametresPage() {
     const sb = createSupabaseClient()
 
     if (editingFam) {
-      // Update family name in familles table
+      // Propage d'abord aux produits : si ça échoue, on ne renomme pas la
+      // famille (sinon produits orphelins + erreur famille_check au moindre
+      // edit, cf. bug #5).
+      const { error: prodError } = await sb
+        .from('produits')
+        .update({ famille: famForm.nom.trim() })
+        .eq('famille', editingFam.nom)
+      if (prodError) { toast.error(`Propagation aux produits impossible : ${prodError.message}`); return }
+
       const { error } = await sb
         .from('familles')
         .update({ nom: famForm.nom.trim() })
         .eq('id', editingFam.id)
       if (error) { toast.error(error.message); return }
-
-      // Update all products with old family name
-      await sb
-        .from('produits')
-        .update({ famille: famForm.nom.trim() })
-        .eq('famille', editingFam.nom)
 
       toast.success('Famille modifiée')
     } else {

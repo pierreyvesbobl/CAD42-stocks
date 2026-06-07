@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { normSearch } from '@/lib/utils'
+import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
 
 // ─── Types ───
 
@@ -131,7 +132,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
   // Delete dialog
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleteImpact, setDeleteImpact] = useState({ boms: 0, mouvements: 0, validations: 0, fabrications: 0 })
+  const [deleteImpact, setDeleteImpact] = useState<DeleteImpact | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   // Nested modal for clicking on substitut names
@@ -438,48 +439,24 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
   // ─── Delete ───
 
-  // Mesure l'impact avant suppression. Les BOM bloquent (FK RESTRICT) ;
-  // l'historique (mouvements, validations, fabrications) sera détaché.
+  // Mesure l'impact avant suppression (logique partagée avec catalogue/[id]).
   async function analyzeDeleteImpact() {
     if (!produit) return
-    const sb = createSupabaseClient()
-    const [bomRes, mouvRes, valRes, fabRes] = await Promise.all([
-      sb.from('nomenclatures').select('id', { count: 'exact', head: true }).eq('composant_id', produit.id),
-      sb.from('mouvements').select('id', { count: 'exact', head: true }).eq('produit_id', produit.id),
-      sb.from('file_validation').select('id', { count: 'exact', head: true }).eq('produit_suggere_id', produit.id),
-      sb.from('fabrication_history').select('id', { count: 'exact', head: true }).eq('produit_id', produit.id),
-    ])
-    setDeleteImpact({
-      boms: bomRes.count ?? 0,
-      mouvements: mouvRes.count ?? 0,
-      validations: valRes.count ?? 0,
-      fabrications: fabRes.count ?? 0,
-    })
+    setDeleteImpact(await getDeleteImpact(produit.id))
     setDeleteOpen(true)
   }
 
   async function handleDelete() {
-    if (!produit) return
+    if (!produit || !deleteImpact) return
     setDeleting(true)
-    const sb = createSupabaseClient()
-    // Détache l'historique (conservé, mais sans lien produit) — les FK sans
-    // ON DELETE bloqueraient la suppression sinon.
-    if (deleteImpact.mouvements > 0) {
-      await sb.from('mouvements').update({ produit_id: null }).eq('produit_id', produit.id)
-    }
-    if (deleteImpact.validations > 0) {
-      await sb.from('file_validation').update({ produit_suggere_id: null }).eq('produit_suggere_id', produit.id)
-    }
-    if (deleteImpact.fabrications > 0) {
-      await sb.from('fabrication_history').update({ produit_id: null }).eq('produit_id', produit.id)
-    }
-    // Substituts et références fournisseurs partent en cascade.
-    const { error } = await sb.from('produits').delete().eq('id', produit.id)
-    setDeleting(false)
-    if (error) {
-      toast.error(error.message)
+    try {
+      await deleteProduitWithDetach(produit.id, deleteImpact)
+    } catch (e) {
+      setDeleting(false)
+      toast.error((e as Error).message)
       return
     }
+    setDeleting(false)
     toast.success(`"${produit.nom}" supprimé`)
     setDeleteOpen(false)
     // Pas via setDirty + handleClose : le state ne serait pas encore propagé
@@ -812,11 +789,11 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
-            {deleteImpact.boms > 0 ? (
+            {(deleteImpact?.usedInBoms ?? 0) > 0 ? (
               <>
                 <p>
                   <strong>&quot;{produit.nom}&quot;</strong> est utilisé comme composant dans{' '}
-                  <strong>{deleteImpact.boms} nomenclature{deleteImpact.boms > 1 ? 's' : ''}</strong>.
+                  <strong>{deleteImpact!.usedInBoms} nomenclature{deleteImpact!.usedInBoms > 1 ? 's' : ''}</strong>.
                 </p>
                 <p className="text-red-700 bg-red-50 rounded-lg p-3">
                   Suppression impossible : retirez-le d&apos;abord de ces nomenclatures,
@@ -829,7 +806,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                   Supprimer définitivement <strong>&quot;{produit.nom}&quot;</strong> ({produit.reference}) ?
                   Cette action est irréversible.
                 </p>
-                {(deleteImpact.mouvements > 0 || deleteImpact.validations > 0 || deleteImpact.fabrications > 0) && (
+                {deleteImpact && (deleteImpact.mouvements > 0 || deleteImpact.validations > 0 || deleteImpact.fabrications > 0) && (
                   <div className="text-muted-foreground space-y-1">
                     <p>Sera conservé mais détaché de ce produit :</p>
                     <ul className="list-disc pl-5">
@@ -838,6 +815,11 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                       {deleteImpact.fabrications > 0 && <li>{deleteImpact.fabrications} fabrication{deleteImpact.fabrications > 1 ? 's' : ''}</li>}
                     </ul>
                   </div>
+                )}
+                {deleteImpact && deleteImpact.ownBomLines > 0 && (
+                  <p className="text-muted-foreground">
+                    Sa nomenclature ({deleteImpact.ownBomLines} ligne{deleteImpact.ownBomLines > 1 ? 's' : ''}) sera supprimée.
+                  </p>
                 )}
                 {(substituts.length > 0 || refsFournisseurs.length > 0) && (
                   <p className="text-muted-foreground">
@@ -859,7 +841,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting || deleteImpact.boms > 0}>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting || (deleteImpact?.usedInBoms ?? 0) > 0}>
               {deleting ? 'Suppression...' : 'Supprimer définitivement'}
             </Button>
           </DialogFooter>

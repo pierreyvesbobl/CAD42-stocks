@@ -32,6 +32,7 @@ import { Badge } from '@/components/ui/badge'
 import { StockBadge } from '@/components/stock-badge'
 import { Pencil, Trash2, ArrowLeft, Plus, X, ArrowUp, ArrowDown, Search } from 'lucide-react'
 import { toast } from 'sonner'
+import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
 
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const STATUTS = ['Composant', 'Produit fini', 'Location', 'Obsolète']
@@ -124,6 +125,8 @@ export default function ProduitDetailPage() {
 
   // Delete
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteImpact, setDeleteImpact] = useState<DeleteImpact | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // ─── Substituts ───
   const [substituts, setSubstituts] = useState<SubstitutRow[]>([])
@@ -282,12 +285,25 @@ export default function ProduitDetailPage() {
     toast.success('Référence supprimée')
   }
 
+  // Analyse l'impact avant d'ouvrir la confirmation (logique partagée avec la
+  // fiche modale) : BOM bloquantes, historique détaché, cascade.
+  async function openDeleteDialog() {
+    setDeleteImpact(await getDeleteImpact(id))
+    setDeleteOpen(true)
+  }
+
   async function handleDelete() {
-    const sb = createSupabaseClient()
-    const { error } = await sb.from('produits').delete().eq('id', id)
-    if (error) { toast.error(error.message); return }
-    toast.success('Produit supprimé')
-    router.push('/composants')
+    if (!produit || !deleteImpact) return
+    setDeleting(true)
+    try {
+      await deleteProduitWithDetach(id, deleteImpact)
+    } catch (e) {
+      setDeleting(false)
+      toast.error((e as Error).message)
+      return
+    }
+    toast.success(`"${produit.nom}" supprimé`)
+    router.push(produit.statut === 'Produit fini' ? '/produits-finis' : '/composants')
   }
 
   async function handleAjustement() {
@@ -415,7 +431,7 @@ export default function ProduitDetailPage() {
             <Button variant="outline" size="sm" onClick={() => { resetEditForm(produit); setEditing(true) }}>
               <Pencil className="h-3.5 w-3.5 mr-1.5" />Modifier
             </Button>
-            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleteOpen(true)}>
+            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={openDeleteDialog}>
               <Trash2 className="h-3.5 w-3.5 mr-1.5" />Supprimer
             </Button>
           </div>
@@ -707,12 +723,53 @@ export default function ProduitDetailPage() {
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Supprimer le produit</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground py-2">
-            Supprimer <strong>{produit.nom}</strong> ? Cette action est irréversible. Les mouvements associés ne seront pas supprimés.
-          </p>
+          <div className="space-y-3 py-2 text-sm">
+            {(deleteImpact?.usedInBoms ?? 0) > 0 ? (
+              <>
+                <p>
+                  <strong>&quot;{produit.nom}&quot;</strong> est utilisé comme composant dans{' '}
+                  <strong>{deleteImpact!.usedInBoms} nomenclature{deleteImpact!.usedInBoms > 1 ? 's' : ''}</strong>.
+                </p>
+                <p className="text-red-700 bg-red-50 rounded-lg p-3">
+                  Suppression impossible : retirez-le d&apos;abord de ces nomenclatures,
+                  ou marquez-le obsolète pour le sortir du flux sans perdre l&apos;historique.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Supprimer définitivement <strong>&quot;{produit.nom}&quot;</strong> ({produit.reference}) ?
+                  Cette action est irréversible.
+                </p>
+                {deleteImpact && (deleteImpact.mouvements > 0 || deleteImpact.validations > 0 || deleteImpact.fabrications > 0) && (
+                  <div className="text-muted-foreground space-y-1">
+                    <p>Sera conservé mais détaché de ce produit :</p>
+                    <ul className="list-disc pl-5">
+                      {deleteImpact.mouvements > 0 && <li>{deleteImpact.mouvements} mouvement{deleteImpact.mouvements > 1 ? 's' : ''} de stock</li>}
+                      {deleteImpact.validations > 0 && <li>{deleteImpact.validations} ligne{deleteImpact.validations > 1 ? 's' : ''} de facture</li>}
+                      {deleteImpact.fabrications > 0 && <li>{deleteImpact.fabrications} fabrication{deleteImpact.fabrications > 1 ? 's' : ''}</li>}
+                    </ul>
+                  </div>
+                )}
+                {deleteImpact && deleteImpact.ownBomLines > 0 && (
+                  <p className="text-muted-foreground">
+                    Sa nomenclature ({deleteImpact.ownBomLines} ligne{deleteImpact.ownBomLines > 1 ? 's' : ''}) sera supprimée.
+                  </p>
+                )}
+                {usedAsSubstitut.length > 0 && (
+                  <p className="text-amber-700 bg-amber-50 rounded-lg p-3">
+                    Attention : ce composant est le substitut de{' '}
+                    {usedAsSubstitut.map((u) => `"${u.composant_nom}"`).join(', ')} — ce{usedAsSubstitut.length > 1 ? 's' : ''} lien{usedAsSubstitut.length > 1 ? 's' : ''} ser{usedAsSubstitut.length > 1 ? 'ont' : 'a'} supprimé{usedAsSubstitut.length > 1 ? 's' : ''}.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
-            <Button variant="destructive" onClick={handleDelete}>Supprimer</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting || (deleteImpact?.usedInBoms ?? 0) > 0}>
+              {deleting ? 'Suppression...' : 'Supprimer définitivement'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

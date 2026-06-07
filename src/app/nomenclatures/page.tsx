@@ -160,13 +160,12 @@ function NomenclaturesContent() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Group nomenclatures by produit_assemble_id
-  const groups: BomGroup[] = produitsFinis
-    .filter((p) => nomenclatures.some((n) => n.produit_assemble_id === p.id))
-    .map((p) => ({
-      produit: p,
-      lignes: nomenclatures.filter((n) => n.produit_assemble_id === p.id),
-    }))
+  // Tous les produits finis, y compris sans BOM (#7) — sinon impossible de
+  // créer une nomenclature a posteriori sur un produit créé sans composant.
+  const groups: BomGroup[] = produitsFinis.map((p) => ({
+    produit: p,
+    lignes: nomenclatures.filter((n) => n.produit_assemble_id === p.id),
+  }))
 
   const filteredGroups = groups.filter((g) => {
     if (!search.trim()) return true
@@ -734,9 +733,13 @@ function NomenclaturesContent() {
                       {g.produit.reference}
                     </span>
                   </div>
-                  <span className="text-sm text-muted-foreground">
-                    {g.lignes.length} composant{g.lignes.length > 1 ? 's' : ''}
-                  </span>
+                  {g.lignes.length === 0 ? (
+                    <span className="text-sm text-amber-600">Aucune BOM — cliquer pour la créer</span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      {g.lignes.length} composant{g.lignes.length > 1 ? 's' : ''}
+                    </span>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

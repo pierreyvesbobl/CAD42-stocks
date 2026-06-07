@@ -98,6 +98,10 @@ export function matchLigne(
 
   let best: CatalogueEntry | null = null
   let bestScore = 0
+  // Produits distincts au niveau du meilleur score — une réf fournisseur peut
+  // être partagée par plusieurs composants (ex. assortiment de passe-câbles
+  // éclaté par diamètre).
+  let topProduits = new Set<string>()
 
   if (refDetectee) {
     for (const p of catalogue) {
@@ -105,6 +109,9 @@ export function matchLigne(
       if (s > bestScore) {
         bestScore = s
         best = p
+        topProduits = new Set([p.produit_id])
+      } else if (s === bestScore && s > 0) {
+        topProduits.add(p.produit_id)
       }
     }
   }
@@ -115,11 +122,20 @@ export function matchLigne(
       if (s > bestScore) {
         bestScore = s
         best = p
+        topProduits = new Set([p.produit_id])
+      } else if (s === bestScore && s > 0) {
+        topProduits.add(p.produit_id)
       }
     }
   }
 
-  if (best && bestScore >= 0.85) return { id: best.produit_id, confiance: 'Connu' }
+  if (best && bestScore >= 0.85) {
+    // Réf partagée entre plusieurs produits → on ne tranche pas à leur place :
+    // confiance 'Similaire' pour forcer la validation humaine (la ligne peut
+    // être dupliquée pour ventiler les quantités entre les variantes).
+    if (topProduits.size > 1) return { id: best.produit_id, confiance: 'Similaire' }
+    return { id: best.produit_id, confiance: 'Connu' }
+  }
   if (best && bestScore >= 0.35) return { id: best.produit_id, confiance: 'Similaire' }
   return { id: null, confiance: 'Inconnu' }
 }
