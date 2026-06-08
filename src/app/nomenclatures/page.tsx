@@ -662,11 +662,11 @@ function NomenclaturesContent() {
 
         {/* Dialog: Add component(s) — multi-sélection (#21) */}
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogContent className="max-h-[88vh] overflow-y-auto overflow-x-hidden">
+          <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Ajouter des composants</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-2">
+            <div className="space-y-4 py-2 min-w-0">
               <div className="space-y-1.5">
                 <Label>Rechercher un composant</Label>
                 <div className="relative">
@@ -705,8 +705,8 @@ function NomenclaturesContent() {
                         onClick={() => toggleAddSelect(c.id)}
                       >
                         <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none shrink-0" />
-                        <span className="font-medium truncate min-w-0 flex-1">{c.nom}</span>
-                        <span className="text-xs text-muted-foreground font-mono shrink-0">{c.reference}</span>
+                        <span className="font-medium truncate min-w-0">{c.nom}</span>
+                        <span className="text-xs text-muted-foreground font-mono shrink-0 ml-auto pl-2">{c.reference}</span>
                       </button>
                     ))}
                     <button
