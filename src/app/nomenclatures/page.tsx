@@ -662,7 +662,7 @@ function NomenclaturesContent() {
 
         {/* Dialog: Add component(s) — multi-sélection (#21) */}
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogContent className="max-h-[88vh] overflow-y-auto">
+          <DialogContent className="max-h-[88vh] overflow-y-auto overflow-x-hidden">
             <DialogHeader>
               <DialogTitle>Ajouter des composants</DialogTitle>
             </DialogHeader>
@@ -699,13 +699,13 @@ function NomenclaturesContent() {
                       <button
                         key={c.id}
                         type="button"
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent cursor-pointer ${
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent cursor-pointer ${
                           addSelected[c.id] !== undefined ? 'bg-accent' : ''
                         }`}
                         onClick={() => toggleAddSelect(c.id)}
                       >
                         <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none shrink-0" />
-                        <span className="font-medium truncate">{c.nom}</span>
+                        <span className="font-medium truncate min-w-0 flex-1">{c.nom}</span>
                         <span className="text-xs text-muted-foreground font-mono shrink-0">{c.reference}</span>
                       </button>
                     ))}
@@ -731,16 +731,16 @@ function NomenclaturesContent() {
                       const c = composants.find((x) => x.id === cid)
                       return (
                         <div key={cid} className="flex items-center gap-2">
-                          <span className="flex-1 text-sm truncate" title={c?.nom}>{c?.nom ?? cid}</span>
+                          <span className="flex-1 min-w-0 text-sm truncate" title={c?.nom}>{c?.nom ?? cid}</span>
                           <Input
                             type="text"
                             inputMode="decimal"
                             value={addSelected[cid]}
                             onChange={(e) => setAddSelected((prev) => ({ ...prev, [cid]: e.target.value }))}
-                            className="w-24 h-8 text-right"
+                            className="w-20 h-8 text-right shrink-0"
                             placeholder="Qté"
                           />
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleAddSelect(cid)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => toggleAddSelect(cid)}>
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>
