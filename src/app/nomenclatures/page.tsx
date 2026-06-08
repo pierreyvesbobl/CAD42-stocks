@@ -102,6 +102,13 @@ function NomenclaturesContent() {
   const [editQuantite, setEditQuantite] = useState('')
   const [editSection, setEditSection] = useState('')
 
+  // Sélection multiple de lignes pour actions groupées (modif section / suppr.)
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+  const [bulkSection, setBulkSection] = useState('')
+
+  // Réinitialise la sélection en changeant de BOM
+  useEffect(() => { setSelectedRows(new Set()); setBulkSection('') }, [selectedProduit])
+
   // Delete BOM dialog
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteProduitId, setDeleteProduitId] = useState<string | null>(null)
@@ -304,6 +311,58 @@ function NomenclaturesContent() {
     loadData()
   }
 
+  // ─── Actions groupées sur la sélection ───
+
+  function toggleRowSelect(id: string) {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelectedRows((prev) =>
+      prev.size === selectedLignes.length ? new Set() : new Set(selectedLignes.map((l) => l.id)),
+    )
+  }
+
+  // Applique (ou retire si null) une section à toutes les lignes cochées.
+  async function handleBulkSection(section: string | null) {
+    if (selectedRows.size === 0) return
+    const sb = createSupabaseClient()
+    const { error } = await sb
+      .from('nomenclatures')
+      .update({ section })
+      .in('id', Array.from(selectedRows))
+    if (error) { toast.error(error.message); return }
+    toast.success(section ? `Section « ${section} » appliquée` : 'Section retirée')
+    setSelectedRows(new Set())
+    setBulkSection('')
+    loadData()
+  }
+
+  async function handleBulkDelete() {
+    if (selectedRows.size === 0) return
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('nomenclatures').delete().in('id', Array.from(selectedRows))
+    if (error) { toast.error(error.message); return }
+    toast.success(`${selectedRows.size} composant(s) retiré(s)`)
+    setSelectedRows(new Set())
+    loadData()
+  }
+
+  // Retire (dégroupe) une section : ses lignes repassent « sans section » (#2).
+  async function handleRemoveSection(sectionName: string) {
+    const ids = selectedLignes.filter((l) => l.section === sectionName).map((l) => l.id)
+    if (ids.length === 0) return
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('nomenclatures').update({ section: null }).in('id', ids)
+    if (error) { toast.error(error.message); return }
+    toast.success(`Section « ${sectionName} » supprimée`)
+    loadData()
+  }
+
   // ─── Delete entire BOM ───
 
   async function handleDeleteBom() {
@@ -486,71 +545,124 @@ function NomenclaturesContent() {
                 Aucun composant. Cliquez sur &quot;Ajouter composant&quot; pour commencer.
               </p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Composant</TableHead>
-                    <TableHead>Référence</TableHead>
-                    <TableHead className="text-right">Quantité</TableHead>
-                    <TableHead className="w-24"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sectionedLignes.map((grp) => (
-                    <Fragment key={grp.key}>
-                      {/* En-tête de section (#20) — masqué s'il n'y a qu'un seul
-                          groupe « Sans section » (BOM non organisée) */}
-                      {showSectionHeaders && (
-                        <TableRow className="bg-muted/40 hover:bg-muted/40">
-                          <TableCell colSpan={4} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            {grp.label}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {grp.lignes.map((l) => (
-                        <TableRow key={l.id}>
-                          <TableCell>
-                            <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
-                              {l.composant_nom}
-                            </button>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground font-mono text-xs">
-                            {l.composant_ref}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">{formatQty(l.quantite)}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1 justify-end">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openEdit(l)}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteComponent(l.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </Fragment>
-                  ))}
-                </TableBody>
-              </Table>
+              <>
+                {/* Barre d'actions groupées (#3) — visible dès qu'une ligne est cochée */}
+                {selectedRows.size > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2">
+                    <span className="text-sm font-medium px-1">{selectedRows.size} sélectionné{selectedRows.size > 1 ? 's' : ''}</span>
+                    <Input
+                      list="bom-sections-bulk"
+                      value={bulkSection}
+                      onChange={(e) => setBulkSection(e.target.value)}
+                      placeholder="Section à appliquer…"
+                      className="h-8 w-56"
+                    />
+                    <datalist id="bom-sections-bulk">
+                      {existingSections.map((s) => <option key={s} value={s} />)}
+                    </datalist>
+                    <Button size="sm" className="h-8" disabled={!bulkSection.trim()} onClick={() => handleBulkSection(bulkSection.trim())}>
+                      Appliquer la section
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8" onClick={() => handleBulkSection(null)}>
+                      Retirer la section
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive ml-auto" onClick={handleBulkDelete}>
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />Supprimer ({selectedRows.size})
+                    </Button>
+                  </div>
+                )}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={selectedRows.size > 0 && selectedRows.size === selectedLignes.length}
+                          onCheckedChange={toggleSelectAll}
+                          title="Tout sélectionner"
+                        />
+                      </TableHead>
+                      <TableHead>Composant</TableHead>
+                      <TableHead>Référence</TableHead>
+                      <TableHead className="text-right">Quantité</TableHead>
+                      <TableHead className="w-24"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sectionedLignes.map((grp) => (
+                      <Fragment key={grp.key}>
+                        {/* En-tête de section (#20) — masqué s'il n'y a qu'un seul
+                            groupe « Sans section » (BOM non organisée) */}
+                        {showSectionHeaders && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={5} className="py-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{grp.label}</span>
+                                {grp.key !== '__no_section__' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                    title="Supprimer cette section (les composants restent, sans section)"
+                                    onClick={() => handleRemoveSection(grp.key)}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {grp.lignes.map((l) => (
+                          <TableRow key={l.id} data-state={selectedRows.has(l.id) ? 'selected' : undefined}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedRows.has(l.id)}
+                                onCheckedChange={() => toggleRowSelect(l.id)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                                {l.composant_nom}
+                              </button>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground font-mono text-xs">
+                              {l.composant_ref}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{formatQty(l.quantite)}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => openEdit(l)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteComponent(l.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
             )}
           </CardContent>
         </Card>
 
         {/* Dialog: Add component(s) — multi-sélection (#21) */}
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogContent>
+          <DialogContent className="max-h-[88vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Ajouter des composants</DialogTitle>
             </DialogHeader>
@@ -567,7 +679,10 @@ function NomenclaturesContent() {
                   />
                 </div>
               </div>
-              <div className="max-h-48 overflow-y-auto border rounded-lg">
+              {/* Wrapper rounded+overflow-hidden pour clipper le fond des lignes
+                  sélectionnées (sinon il déborde des coins arrondis) */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-48 overflow-y-auto">
                 {filteredAddComposants.length === 0 ? (
                   <div className="text-center py-4">
                     <p className="text-sm text-muted-foreground mb-2">
@@ -589,9 +704,9 @@ function NomenclaturesContent() {
                         }`}
                         onClick={() => toggleAddSelect(c.id)}
                       >
-                        <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none" />
-                        <span className="font-medium">{c.nom}</span>
-                        <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
+                        <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none shrink-0" />
+                        <span className="font-medium truncate">{c.nom}</span>
+                        <span className="text-xs text-muted-foreground font-mono shrink-0">{c.reference}</span>
                       </button>
                     ))}
                     <button
@@ -599,11 +714,12 @@ function NomenclaturesContent() {
                       className="flex w-full items-center gap-2 px-3 py-2 text-sm text-blue-600 hover:bg-accent cursor-pointer border-t"
                       onClick={() => openCreateProduct()}
                     >
-                      <Plus className="h-3.5 w-3.5" />
+                      <Plus className="h-3.5 w-3.5 shrink-0" />
                       <span className="font-medium">Créer un nouveau produit</span>
                     </button>
                   </>
                 )}
+                </div>
               </div>
 
               {/* Sélection : quantité par composant */}

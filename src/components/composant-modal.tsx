@@ -118,6 +118,9 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
   // Supplier refs
   const [addingRef, setAddingRef] = useState(false)
   const [newRef, setNewRef] = useState({ reference: '', fournisseur: '', lien_url: '' })
+  // Édition manuelle du lien d'une réf existante (#1)
+  const [editingLienId, setEditingLienId] = useState<string | null>(null)
+  const [editingLienValue, setEditingLienValue] = useState('')
 
   // Add substitut
   const [addSubOpen, setAddSubOpen] = useState(false)
@@ -279,6 +282,23 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     const sb = createSupabaseClient()
     await sb.from('references_fournisseurs').delete().eq('id', refId)
     setRefsFournisseurs((prev) => prev.filter((r) => r.id !== refId))
+  }
+
+  function startEditLien(r: RefFournisseur) {
+    setEditingLienId(r.id)
+    setEditingLienValue(refLienUrl(r) ?? '')
+  }
+
+  async function handleSaveLien(refId: string) {
+    const v = editingLienValue.trim()
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('references_fournisseurs')
+      .update({ lien_url: v || null, lien_verifie_le: v ? new Date().toISOString() : null })
+      .eq('id', refId)
+    if (error) { toast.error(error.message); return }
+    setRefsFournisseurs((prev) => prev.map((r) => r.id === refId ? { ...r, lien_url: v || null } : r))
+    setEditingLienId(null)
+    setEditingLienValue('')
   }
 
   // Lookup automatique du lien fournisseur (#4) : Amazon en priorité, fallback
@@ -665,27 +685,57 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                           {asUrl(r.fournisseur) ? new URL(asUrl(r.fournisseur)!).hostname : r.fournisseur ?? '—'}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {lien ? (
-                            <a
-                              href={lien}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              Voir
-                            </a>
+                          {editingLienId === r.id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={editingLienValue}
+                                onChange={(e) => setEditingLienValue(e.target.value)}
+                                placeholder="https://…"
+                                className="h-7 text-xs w-48"
+                                autoFocus
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveLien(r.id) }}
+                              />
+                              <Button size="sm" className="h-7 px-2 text-xs" onClick={() => handleSaveLien(r.id)}>OK</Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingLienId(null); setEditingLienValue('') }}><X className="h-3 w-3" /></Button>
+                            </div>
+                          ) : lien ? (
+                            <div className="flex items-center gap-1">
+                              <a
+                                href={lien}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Voir
+                              </a>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => startEditLien(r)} title="Modifier le lien">
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </div>
                           ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-xs"
-                              onClick={() => handleSearchLink(r)}
-                              title="Rechercher le lien fournisseur"
-                            >
-                              <Globe className="h-3 w-3 mr-1" />
-                              Trouver
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => startEditLien(r)}
+                                title="Ajouter un lien à la main"
+                              >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Lien
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-muted-foreground"
+                                onClick={() => handleSearchLink(r)}
+                                title="Rechercher automatiquement (Amazon)"
+                              >
+                                <Globe className="h-3 w-3 mr-1" />
+                                Trouver
+                              </Button>
+                            </div>
                           )}
                         </TableCell>
                         <TableCell className="w-8">
