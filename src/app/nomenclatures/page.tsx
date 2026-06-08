@@ -29,12 +29,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
 import { Search, Plus, Pencil, Trash2, ArrowLeft, Package, Copy, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
 import { normSearch, parseDecimal, formatQty } from '@/lib/utils'
 import { duplicateProduit } from '@/lib/duplicate-produit'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
+import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
 
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
@@ -48,6 +50,7 @@ interface Composant {
   id: string
   reference: string
   nom: string
+  statut: string
 }
 
 interface NomRow {
@@ -58,6 +61,7 @@ interface NomRow {
   section: string | null
   composant_nom: string
   composant_ref: string
+  composant_statut: string
 }
 
 interface BomGroup {
@@ -75,6 +79,9 @@ function NomenclaturesContent() {
   const [produitsFinis, setProduitsFinis] = useState<ProduitFini[]>([])
   const [composants, setComposants] = useState<Composant[]>([])
   const [nomenclatures, setNomenclatures] = useState<NomRow[]>([])
+  // Ids interdits comme composant de la BOM ouverte (le produit lui-même + ses
+  // ancêtres) — les ajouter créerait un cycle. Chargé via rpc bom_invalid_components.
+  const [invalidComponentIds, setInvalidComponentIds] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
 
   function openBom(produitId: string) {
@@ -113,6 +120,11 @@ function NomenclaturesContent() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteProduitId, setDeleteProduitId] = useState<string | null>(null)
 
+  // Suppression du produit fini lui-même (pas seulement sa BOM), avec impact
+  const [deleteProductOpen, setDeleteProductOpen] = useState(false)
+  const [deleteProductImpact, setDeleteProductImpact] = useState<DeleteImpact | null>(null)
+  const [deletingProduct, setDeletingProduct] = useState(false)
+
   // Component detail modal
   const [detailModalId, setDetailModalId] = useState<string | null>(null)
 
@@ -135,9 +147,11 @@ function NomenclaturesContent() {
       .order('nom')
       .then(({ data }) => setProduitsFinis(data ?? []))
 
+    // Composants candidats : on autorise aussi les produits finis comme
+    // composant (BOM imbriquée / « kit présenté sous une autre forme »).
     sb.from('produits')
-      .select('id, reference, nom')
-      .eq('statut', 'Composant')
+      .select('id, reference, nom, statut')
+      .in('statut', ['Composant', 'Produit fini'])
       .order('nom')
       .then(({ data }) => setComposants(data ?? []))
 
@@ -153,7 +167,7 @@ function NomenclaturesContent() {
       })
 
     sb.from('nomenclatures')
-      .select('id, produit_assemble_id, composant_id, quantite, section, composant:composant_id(nom, reference)')
+      .select('id, produit_assemble_id, composant_id, quantite, section, composant:composant_id(nom, reference, statut)')
       .order('created_at')
       .then(({ data }) => {
         const rows = (data ?? []).map((r: Record<string, unknown>) => ({
@@ -164,12 +178,23 @@ function NomenclaturesContent() {
           section: (r.section as string | null) ?? null,
           composant_nom: (r.composant as { nom: string } | null)?.nom ?? '',
           composant_ref: (r.composant as { reference: string } | null)?.reference ?? '',
+          composant_statut: (r.composant as { statut: string } | null)?.statut ?? '',
         }))
         setNomenclatures(rows)
       })
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Candidats interdits (anti-cycle) pour la BOM ouverte : le produit lui-même
+  // et tous ses ancêtres. Le trigger DB reste le garde-fou dur.
+  useEffect(() => {
+    if (!selectedProduit) { setInvalidComponentIds(new Set()); return }
+    const sb = createSupabaseClient()
+    sb.rpc('bom_invalid_components', { p_produit_id: selectedProduit }).then(({ data }) => {
+      setInvalidComponentIds(new Set(((data ?? []) as { id: string }[]).map((r) => r.id)))
+    })
+  }, [selectedProduit, nomenclatures])
 
   // Tous les produits finis, y compris sans BOM (#7) — sinon impossible de
   // créer une nomenclature a posteriori sur un produit créé sans composant.
@@ -229,6 +254,8 @@ function NomenclaturesContent() {
   const filteredAddComposants = composants.filter((c) => {
     // Exclude already added
     if (selectedLignes.some((l) => l.composant_id === c.id)) return false
+    // Exclude le produit lui-même + ses ancêtres (créerait un cycle)
+    if (invalidComponentIds.has(c.id)) return false
     if (!addSearch.trim()) return true
     const s = normSearch(addSearch)
     return normSearch(c.nom).includes(s) || normSearch(c.reference).includes(s)
@@ -262,7 +289,10 @@ function NomenclaturesContent() {
       })),
     )
     if (error) {
-      toast.error(error.message)
+      // Le trigger anti-cycle remonte un message explicite ; on le relaie tel quel.
+      toast.error(/cycle/i.test(error.message)
+        ? 'Impossible : ce composant créerait un cycle dans la nomenclature.'
+        : error.message)
       return
     }
     toast.success(ids.length > 1 ? `${ids.length} composants ajoutés` : 'Composant ajouté')
@@ -368,16 +398,49 @@ function NomenclaturesContent() {
   async function handleDeleteBom() {
     if (!deleteProduitId) return
     const sb = createSupabaseClient()
-    const { error } = await sb
+    const { data, error } = await sb
       .from('nomenclatures')
       .delete()
       .eq('produit_assemble_id', deleteProduitId)
+      .select('id')
     if (error) {
       toast.error(error.message)
       return
     }
-    toast.success('Nomenclature supprimée')
     setDeleteOpen(false)
+    // Aucune ligne supprimée = ce produit fini n'avait pas de BOM. On ne ment
+    // plus avec « Nomenclature supprimée » : le produit lui-même se retire via
+    // « Supprimer le produit ».
+    if (!data || data.length === 0) {
+      toast.info('Aucune BOM à supprimer pour ce produit')
+      return
+    }
+    toast.success('Nomenclature supprimée')
+    closeBom()
+    loadData()
+  }
+
+  // ─── Delete the finished product itself (not just its BOM) ───
+
+  async function analyzeProductDeleteImpact() {
+    if (!selectedProduit) return
+    setDeleteProductImpact(await getDeleteImpact(selectedProduit))
+    setDeleteProductOpen(true)
+  }
+
+  async function handleDeleteProduct() {
+    if (!selectedProduit || !deleteProductImpact) return
+    setDeletingProduct(true)
+    try {
+      await deleteProduitWithDetach(selectedProduit, deleteProductImpact)
+    } catch (e) {
+      setDeletingProduct(false)
+      toast.error((e as Error).message)
+      return
+    }
+    setDeletingProduct(false)
+    toast.success(`Produit « ${selectedProduitData?.nom ?? ''} » supprimé`)
+    setDeleteProductOpen(false)
     closeBom()
     loadData()
   }
@@ -531,6 +594,15 @@ function NomenclaturesContent() {
             <Trash2 className="h-3.5 w-3.5 mr-1.5" />
             Supprimer BOM
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            onClick={analyzeProductDeleteImpact}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            Supprimer le produit
+          </Button>
         </div>
 
         <Card>
@@ -621,9 +693,14 @@ function NomenclaturesContent() {
                               />
                             </TableCell>
                             <TableCell>
-                              <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
-                                {l.composant_nom}
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                                  {l.composant_nom}
+                                </button>
+                                {l.composant_statut === 'Produit fini' && (
+                                  <Badge variant="secondary" className="text-[10px] font-normal">Sous-ensemble</Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground font-mono text-xs">
                               {l.composant_ref}
@@ -706,6 +783,9 @@ function NomenclaturesContent() {
                       >
                         <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none shrink-0" />
                         <span className="font-medium truncate min-w-0">{c.nom}</span>
+                        {c.statut === 'Produit fini' && (
+                          <Badge variant="secondary" className="text-[10px] font-normal shrink-0">Sous-ensemble</Badge>
+                        )}
                         <span className="text-xs text-muted-foreground font-mono shrink-0 ml-auto pl-2">{c.reference}</span>
                       </button>
                     ))}
@@ -829,6 +909,59 @@ function NomenclaturesContent() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
               <Button variant="destructive" onClick={handleDeleteBom}>Supprimer</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog: Delete the finished product itself (with impact analysis) */}
+        <Dialog open={deleteProductOpen} onOpenChange={setDeleteProductOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-destructive" />
+                Supprimer ce produit ?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2 text-sm">
+              {(deleteProductImpact?.usedInBoms ?? 0) > 0 ? (
+                <>
+                  <p>
+                    <strong>« {selectedProduitData.nom} »</strong> est utilisé comme composant dans{' '}
+                    <strong>{deleteProductImpact!.usedInBoms} nomenclature{deleteProductImpact!.usedInBoms > 1 ? 's' : ''}</strong>.
+                  </p>
+                  <p className="text-red-700 bg-red-50 rounded-lg p-3">
+                    Suppression impossible : retirez-le d&apos;abord de ces nomenclatures.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Supprimer définitivement <strong>« {selectedProduitData.nom} »</strong> ({selectedProduitData.reference}) ?
+                    Cette action est irréversible.
+                  </p>
+                  {deleteProductImpact && (deleteProductImpact.mouvements > 0 || deleteProductImpact.validations > 0 || deleteProductImpact.fabrications > 0) && (
+                    <div className="text-muted-foreground space-y-1">
+                      <p>Sera conservé mais détaché de ce produit :</p>
+                      <ul className="list-disc pl-5">
+                        {deleteProductImpact.mouvements > 0 && <li>{deleteProductImpact.mouvements} mouvement{deleteProductImpact.mouvements > 1 ? 's' : ''} de stock</li>}
+                        {deleteProductImpact.validations > 0 && <li>{deleteProductImpact.validations} ligne{deleteProductImpact.validations > 1 ? 's' : ''} de facture</li>}
+                        {deleteProductImpact.fabrications > 0 && <li>{deleteProductImpact.fabrications} fabrication{deleteProductImpact.fabrications > 1 ? 's' : ''}</li>}
+                      </ul>
+                    </div>
+                  )}
+                  {deleteProductImpact && deleteProductImpact.ownBomLines > 0 && (
+                    <p className="text-muted-foreground">
+                      Sa nomenclature ({deleteProductImpact.ownBomLines} ligne{deleteProductImpact.ownBomLines > 1 ? 's' : ''}) sera supprimée.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteProductOpen(false)}>Annuler</Button>
+              <Button variant="destructive" onClick={handleDeleteProduct} disabled={deletingProduct || (deleteProductImpact?.usedInBoms ?? 0) > 0}>
+                {deletingProduct ? 'Suppression...' : 'Supprimer définitivement'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

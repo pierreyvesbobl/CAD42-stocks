@@ -45,6 +45,9 @@ interface BomPreview {
   composant_id: string; reference: string; nom: string
   quantite_necessaire: number; stock_actuel: number; stock_apres: number
   is_deficit: boolean; is_alerte: boolean; section: string | null
+  // BOM imbriquée : 'leaf' = composant feuille, 'sous_ensemble' = produit fini
+  // consommé depuis son propre stock (#bom-imbriquees)
+  statut: string; kind: string
 }
 
 interface SubstitutRow {
@@ -57,6 +60,7 @@ interface ResolvedLine {
   composant_id: string; composant_nom: string; composant_ref: string
   quantite_necessaire: number; stock_actuel: number
   section: string | null
+  kind: string // 'leaf' | 'sous_ensemble' (produit fini consommé du stock)
   // Resolution
   status: 'green' | 'orange' | 'red'
   used_id: string // actual component ID to consume (original or substitut)
@@ -189,6 +193,7 @@ export default function FabricationPage() {
         composant_id: b.composant_id, composant_nom: b.nom, composant_ref: b.reference,
         quantite_necessaire: b.quantite_necessaire, stock_actuel: b.stock_actuel,
         section: b.section ?? null,
+        kind: b.kind ?? 'leaf',
         status: 'green', used_id: b.composant_id, used_nom: b.nom,
         used_stock: b.stock_actuel, is_substitut: false, checked: mode === 'fabrication',
       }
@@ -241,6 +246,7 @@ export default function FabricationPage() {
     sb.rpc('resolve_bom', {
       p_produit_id: selectedId,
       p_quantite: parseInt(quantite, 10) || 1,
+      p_stock_aware: true, // plan de fabrication hybride : consomme le stock des sous-ensembles dispo
     }).then(({ data }) => {
       const bomData = (data as BomPreview[]) ?? []
       setPreview(bomData)
@@ -600,9 +606,14 @@ export default function FabricationPage() {
                               />
                             </TableCell>
                             <TableCell>
-                              <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
-                                {l.composant_nom}
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                                  {l.composant_nom}
+                                </button>
+                                {l.kind === 'sous_ensemble' && (
+                                  <Badge variant="secondary" className="text-[10px] font-normal">Consommé du stock</Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               {l.is_substitut ? (
