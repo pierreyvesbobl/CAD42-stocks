@@ -30,7 +30,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StockBadge } from '@/components/stock-badge'
-import { Pencil, Trash2, ArrowLeft, Plus, X, ArrowUp, ArrowDown, Search } from 'lucide-react'
+import { Pencil, Trash2, ArrowLeft, Plus, X, ArrowUp, ArrowDown, Search, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
 
@@ -53,6 +53,7 @@ interface RefFournisseur {
   id: string
   reference: string
   fournisseur: string | null
+  lien_url: string | null
 }
 
 interface BomRow {
@@ -109,7 +110,7 @@ export default function ProduitDetailPage() {
   const [bom, setBom] = useState<BomRow[]>([])
   const [mouvements, setMouvements] = useState<MouvementRow[]>([])
   const [refsFournisseurs, setRefsFournisseurs] = useState<RefFournisseur[]>([])
-  const [newRef, setNewRef] = useState({ reference: '', fournisseur: '' })
+  const [newRef, setNewRef] = useState({ reference: '', fournisseur: '', lien_url: '' })
   const [addingRef, setAddingRef] = useState(false)
 
   // Stock adjustment
@@ -204,7 +205,7 @@ export default function ProduitDetailPage() {
       .then(({ data }) => setMouvements((data as MouvementRow[]) ?? []))
 
     sb.from('references_fournisseurs')
-      .select('id, reference, fournisseur')
+      .select('id, reference, fournisseur, lien_url')
       .eq('produit_id', id)
       .order('created_at')
       .then(({ data }) => setRefsFournisseurs((data as RefFournisseur[]) ?? []))
@@ -264,15 +265,22 @@ export default function ProduitDetailPage() {
 
   async function handleAddRef() {
     if (!newRef.reference.trim()) { toast.error('Référence requise'); return }
+    const lien = newRef.lien_url.trim()
     const sb = createSupabaseClient()
     const { data, error } = await sb
       .from('references_fournisseurs')
-      .insert({ produit_id: id, reference: newRef.reference.trim(), fournisseur: newRef.fournisseur.trim() || null })
-      .select('id, reference, fournisseur')
+      .insert({
+        produit_id: id,
+        reference: newRef.reference.trim(),
+        fournisseur: newRef.fournisseur.trim() || null,
+        lien_url: lien || null,
+        lien_verifie_le: lien ? new Date().toISOString() : null,
+      })
+      .select('id, reference, fournisseur, lien_url')
       .single()
     if (error) { toast.error(error.message); return }
     setRefsFournisseurs((prev) => [...prev, data as RefFournisseur])
-    setNewRef({ reference: '', fournisseur: '' })
+    setNewRef({ reference: '', fournisseur: '', lien_url: '' })
     setAddingRef(false)
     toast.success('Référence fournisseur ajoutée')
   }
@@ -653,6 +661,10 @@ export default function ProduitDetailPage() {
                 <Label>Fournisseur</Label>
                 <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Nom du fournisseur" />
               </div>
+              <div className="space-y-1.5 flex-1">
+                <Label>Lien</Label>
+                <Input value={newRef.lien_url} onChange={(e) => setNewRef((r) => ({ ...r, lien_url: e.target.value }))} placeholder="https://…" />
+              </div>
               <Button size="sm" onClick={handleAddRef}>Ajouter</Button>
               <Button size="sm" variant="ghost" onClick={() => setAddingRef(false)}><X className="h-3.5 w-3.5" /></Button>
             </div>
@@ -665,6 +677,7 @@ export default function ProduitDetailPage() {
                 <TableRow>
                   <TableHead>Référence</TableHead>
                   <TableHead>Fournisseur</TableHead>
+                  <TableHead>Lien</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -673,6 +686,13 @@ export default function ProduitDetailPage() {
                   <TableRow key={r.id}>
                     <TableCell className="font-mono">{r.reference}</TableCell>
                     <TableCell>{r.fournisseur ?? '—'}</TableCell>
+                    <TableCell>
+                      {r.lien_url ? (
+                        <a href={r.lien_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline text-sm">
+                          <ExternalLink className="h-3.5 w-3.5" />Voir
+                        </a>
+                      ) : '—'}
+                    </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleDeleteRef(r.id)}>
                         <Trash2 className="h-3.5 w-3.5" />

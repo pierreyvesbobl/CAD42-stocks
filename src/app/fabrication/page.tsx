@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -34,7 +34,7 @@ import {
 import { toast } from 'sonner'
 import { Search, Undo2, Factory, Wrench, Plus, Trash2, ArrowUp, ArrowDown, Settings2 } from 'lucide-react'
 import { ComposantModal } from '@/components/composant-modal'
-import { normSearch } from '@/lib/utils'
+import { normSearch, formatQty } from '@/lib/utils'
 
 // ─── Types ───
 
@@ -44,7 +44,7 @@ interface Operateur { id: string; nom: string; email: string | null }
 interface BomPreview {
   composant_id: string; reference: string; nom: string
   quantite_necessaire: number; stock_actuel: number; stock_apres: number
-  is_deficit: boolean; is_alerte: boolean
+  is_deficit: boolean; is_alerte: boolean; section: string | null
 }
 
 interface SubstitutRow {
@@ -56,10 +56,12 @@ interface SubstitutRow {
 interface ResolvedLine {
   composant_id: string; composant_nom: string; composant_ref: string
   quantite_necessaire: number; stock_actuel: number
+  section: string | null
   // Resolution
   status: 'green' | 'orange' | 'red'
   used_id: string // actual component ID to consume (original or substitut)
   used_nom: string
+  used_stock: number // stock disponible de l'élément réellement consommé (#22)
   is_substitut: boolean
   checked: boolean
 }
@@ -186,8 +188,9 @@ export default function FabricationPage() {
       const line: ResolvedLine = {
         composant_id: b.composant_id, composant_nom: b.nom, composant_ref: b.reference,
         quantite_necessaire: b.quantite_necessaire, stock_actuel: b.stock_actuel,
+        section: b.section ?? null,
         status: 'green', used_id: b.composant_id, used_nom: b.nom,
-        is_substitut: false, checked: mode === 'fabrication',
+        used_stock: b.stock_actuel, is_substitut: false, checked: mode === 'fabrication',
       }
 
       const isObsolete = statutById.get(b.composant_id) === 'Obsolète'
@@ -210,6 +213,7 @@ export default function FabricationPage() {
             line.status = 'orange'
             line.used_id = s.substitut_id
             line.used_nom = sub.nom
+            line.used_stock = sub.stock_actuel
             line.is_substitut = true
             found = true
             break
@@ -261,6 +265,25 @@ export default function FabricationPage() {
 
   const hasBlockingRed = resolvedLines.some((l) => l.checked && l.status === 'red')
   const hasAnyRed = resolvedLines.some((l) => l.status === 'red')
+
+  // Regroupement du récap par section (#20) — identique à la vue nomenclature.
+  // Pour une option (BOM imbriquée), la section porte le nom du sous-assemblage.
+  const sectionedResolved = (() => {
+    const order: string[] = []
+    const map = new Map<string, ResolvedLine[]>()
+    for (const l of resolvedLines) {
+      const key = l.section ?? '__no_section__'
+      if (!map.has(key)) { map.set(key, []); order.push(key) }
+      map.get(key)!.push(l)
+    }
+    order.sort((a, b) => (a === '__no_section__' ? 1 : b === '__no_section__' ? -1 : 0))
+    return order.map((key) => ({
+      key,
+      label: key === '__no_section__' ? 'Sans section' : key,
+      lignes: map.get(key)!,
+    }))
+  })()
+  const showFabSections = sectionedResolved.length > 1 || sectionedResolved[0]?.key !== '__no_section__'
 
   // ─── Substitut management modal ───
 
@@ -551,52 +574,70 @@ export default function FabricationPage() {
                       </TableHead>
                       <TableHead>Composant principal</TableHead>
                       <TableHead>Substitut utilisé</TableHead>
-                      <TableHead>Qté</TableHead>
+                      <TableHead className="text-right">Qté prise</TableHead>
+                      <TableHead className="text-right">Stock dispo</TableHead>
                       <TableHead>Statut</TableHead>
                       <TableHead className="w-40"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {resolvedLines.map((l) => (
-                      <TableRow key={l.composant_id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={l.checked}
-                            disabled={l.status === 'red'}
-                            onCheckedChange={() => toggleLine(l.composant_id)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
-                            {l.composant_nom}
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          {l.is_substitut ? (
-                            <span className="text-orange-700">{l.used_nom}</span>
-                          ) : (
-                            <span className="text-muted-foreground">(composant principal)</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="tabular-nums">{l.quantite_necessaire}</TableCell>
-                        <TableCell>
-                          {l.status === 'green' && <span className="text-lg">&#x2705;</span>}
-                          {l.status === 'orange' && <span className="text-lg">&#x26A0;&#xFE0F;</span>}
-                          {l.status === 'red' && <span className="text-lg">&#x1F534;</span>}
-                        </TableCell>
-                        <TableCell>
-                          {l.status === 'orange' && (
-                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
-                              <Settings2 className="h-3 w-3 mr-1" />Gérer substituts
-                            </Button>
-                          )}
-                          {l.status === 'red' && (
-                            <Button variant="outline" size="sm" className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
-                              <Plus className="h-3 w-3 mr-1" />Ajouter un substitut
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
+                    {sectionedResolved.map((grp) => (
+                      <Fragment key={grp.key}>
+                        {showFabSections && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={7} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {grp.label}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {grp.lignes.map((l) => (
+                          <TableRow key={l.composant_id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={l.checked}
+                                disabled={l.status === 'red'}
+                                onCheckedChange={() => toggleLine(l.composant_id)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                                {l.composant_nom}
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              {l.is_substitut ? (
+                                <span className="text-orange-700">{l.used_nom}</span>
+                              ) : (
+                                <span className="text-muted-foreground">(composant principal)</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{formatQty(l.quantite_necessaire)}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {/* Stock disponible de l'élément réellement consommé (#22) */}
+                              <span className={l.used_stock < l.quantite_necessaire ? 'text-red-600 font-medium' : l.used_stock <= l.quantite_necessaire ? 'text-amber-600' : ''}>
+                                {l.used_stock}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              {l.status === 'green' && <span className="text-lg">&#x2705;</span>}
+                              {l.status === 'orange' && <span className="text-lg">&#x26A0;&#xFE0F;</span>}
+                              {l.status === 'red' && <span className="text-lg">&#x1F534;</span>}
+                            </TableCell>
+                            <TableCell>
+                              {l.status === 'orange' && (
+                                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
+                                  <Settings2 className="h-3 w-3 mr-1" />Gérer substituts
+                                </Button>
+                              )}
+                              {l.status === 'red' && (
+                                <Button variant="outline" size="sm" className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => openSubModal(l.composant_id, l.composant_nom)}>
+                                  <Plus className="h-3 w-3 mr-1" />Ajouter un substitut
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>

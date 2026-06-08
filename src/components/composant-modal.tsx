@@ -117,7 +117,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
   // Supplier refs
   const [addingRef, setAddingRef] = useState(false)
-  const [newRef, setNewRef] = useState({ reference: '', fournisseur: '' })
+  const [newRef, setNewRef] = useState({ reference: '', fournisseur: '', lien_url: '' })
 
   // Add substitut
   const [addSubOpen, setAddSubOpen] = useState(false)
@@ -258,13 +258,20 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
 
   async function handleAddRef() {
     if (!newRef.reference.trim() || !produit) return
+    const lien = newRef.lien_url.trim()
     const sb = createSupabaseClient()
     const { data, error } = await sb.from('references_fournisseurs')
-      .insert({ produit_id: produit.id, reference: newRef.reference.trim(), fournisseur: newRef.fournisseur.trim() || null })
+      .insert({
+        produit_id: produit.id,
+        reference: newRef.reference.trim(),
+        fournisseur: newRef.fournisseur.trim() || null,
+        lien_url: lien || null,
+        lien_verifie_le: lien ? new Date().toISOString() : null,
+      })
       .select('id, reference, fournisseur, lien_url, lien_verifie_le').single()
     if (error) { toast.error(error.message); return }
     setRefsFournisseurs((prev) => [...prev, data as RefFournisseur])
-    setNewRef({ reference: '', fournisseur: '' })
+    setNewRef({ reference: '', fournisseur: '', lien_url: '' })
     setAddingRef(false)
   }
 
@@ -639,8 +646,9 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
               </div>
               {addingRef && (
                 <div className="flex items-end gap-2">
-                  <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Réf" className="h-8" />
-                  <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Fournisseur" className="h-8" />
+                  <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Réf fournisseur" className="h-8" />
+                  <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Nom fournisseur" className="h-8" />
+                  <Input value={newRef.lien_url} onChange={(e) => setNewRef((r) => ({ ...r, lien_url: e.target.value }))} placeholder="Lien (https://…)" className="h-8" />
                   <Button size="sm" className="h-8" onClick={handleAddRef}>OK</Button>
                   <Button size="sm" variant="ghost" className="h-8" onClick={() => setAddingRef(false)}><X className="h-3 w-3" /></Button>
                 </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useEffect, useState, useCallback, Suspense, Fragment } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,10 +28,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2, ArrowLeft, Package, Copy } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Search, Plus, Pencil, Trash2, ArrowLeft, Package, Copy, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ComposantModal } from '@/components/composant-modal'
-import { normSearch } from '@/lib/utils'
+import { normSearch, parseDecimal, formatQty } from '@/lib/utils'
 import { duplicateProduit } from '@/lib/duplicate-produit'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
 
@@ -54,6 +55,7 @@ interface NomRow {
   produit_assemble_id: string
   composant_id: string
   quantite: number
+  section: string | null
   composant_nom: string
   composant_ref: string
 }
@@ -88,16 +90,17 @@ function NomenclaturesContent() {
     document.querySelector('main')?.scrollTo({ top: 0 })
   }, [selectedProduit])
 
-  // Add component dialog
+  // Add component dialog — multi-sélection (#21) : un id → quantité saisie
   const [addOpen, setAddOpen] = useState(false)
   const [addSearch, setAddSearch] = useState('')
-  const [addComposantId, setAddComposantId] = useState('')
-  const [addQuantite, setAddQuantite] = useState('1')
+  const [addSelected, setAddSelected] = useState<Record<string, string>>({})
+  const [addSection, setAddSection] = useState('')
 
   // Edit quantity dialog
   const [editOpen, setEditOpen] = useState(false)
   const [editRow, setEditRow] = useState<NomRow | null>(null)
   const [editQuantite, setEditQuantite] = useState('')
+  const [editSection, setEditSection] = useState('')
 
   // Delete BOM dialog
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -143,7 +146,7 @@ function NomenclaturesContent() {
       })
 
     sb.from('nomenclatures')
-      .select('id, produit_assemble_id, composant_id, quantite, composant:composant_id(nom, reference)')
+      .select('id, produit_assemble_id, composant_id, quantite, section, composant:composant_id(nom, reference)')
       .order('created_at')
       .then(({ data }) => {
         const rows = (data ?? []).map((r: Record<string, unknown>) => ({
@@ -151,6 +154,7 @@ function NomenclaturesContent() {
           produit_assemble_id: r.produit_assemble_id as string,
           composant_id: r.composant_id as string,
           quantite: r.quantite as number,
+          section: (r.section as string | null) ?? null,
           composant_nom: (r.composant as { nom: string } | null)?.nom ?? '',
           composant_ref: (r.composant as { reference: string } | null)?.reference ?? '',
         }))
@@ -192,6 +196,27 @@ function NomenclaturesContent() {
     ? nomenclatures.filter((n) => n.produit_assemble_id === selectedProduit)
     : []
 
+  // Regroupement par section (#20) — les lignes sans section finissent dans un
+  // groupe « Sans section » placé en dernier ; ordre des sections par 1re
+  // apparition pour rester stable.
+  const sectionedLignes = (() => {
+    const order: string[] = []
+    const map = new Map<string, NomRow[]>()
+    for (const l of selectedLignes) {
+      const key = l.section ?? '__no_section__' // sentinelle « sans section »
+      if (!map.has(key)) { map.set(key, []); order.push(key) }
+      map.get(key)!.push(l)
+    }
+    order.sort((a, b) => (a === '__no_section__' ? 1 : b === '__no_section__' ? -1 : 0))
+    return order.map((key) => ({
+      key,
+      label: key === '__no_section__' ? 'Sans section' : key,
+      lignes: map.get(key)!,
+    }))
+  })()
+  // En-têtes affichés seulement si la BOM est réellement sectionnée
+  const showSectionHeaders = sectionedLignes.length > 1 || sectionedLignes[0]?.key !== '__no_section__'
+
   // ─── Add component ───
 
   const filteredAddComposants = composants.filter((c) => {
@@ -202,22 +227,41 @@ function NomenclaturesContent() {
     return normSearch(c.nom).includes(s) || normSearch(c.reference).includes(s)
   })
 
-  async function handleAddComponent() {
-    if (!addComposantId || !selectedProduit) return
-    const sb = createSupabaseClient()
-    const { error } = await sb.from('nomenclatures').insert({
-      produit_assemble_id: selectedProduit,
-      composant_id: addComposantId,
-      quantite: parseInt(addQuantite, 10) || 1,
+  // Sections déjà utilisées dans cette BOM (suggestions de saisie)
+  const existingSections = Array.from(
+    new Set(selectedLignes.map((l) => l.section).filter((s): s is string => !!s)),
+  ).sort()
+
+  function toggleAddSelect(composantId: string) {
+    setAddSelected((prev) => {
+      const next = { ...prev }
+      if (next[composantId] !== undefined) delete next[composantId]
+      else next[composantId] = '1'
+      return next
     })
+  }
+
+  async function handleAddComponent() {
+    const ids = Object.keys(addSelected)
+    if (ids.length === 0 || !selectedProduit) return
+    const section = addSection.trim() || null
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('nomenclatures').insert(
+      ids.map((composant_id) => ({
+        produit_assemble_id: selectedProduit,
+        composant_id,
+        quantite: parseDecimal(addSelected[composant_id], 1),
+        section,
+      })),
+    )
     if (error) {
       toast.error(error.message)
       return
     }
-    toast.success('Composant ajouté')
+    toast.success(ids.length > 1 ? `${ids.length} composants ajoutés` : 'Composant ajouté')
     setAddOpen(false)
-    setAddComposantId('')
-    setAddQuantite('1')
+    setAddSelected({})
+    setAddSection('')
     setAddSearch('')
     loadData()
   }
@@ -226,7 +270,8 @@ function NomenclaturesContent() {
 
   function openEdit(row: NomRow) {
     setEditRow(row)
-    setEditQuantite(String(row.quantite))
+    setEditQuantite(formatQty(row.quantite))
+    setEditSection(row.section ?? '')
     setEditOpen(true)
   }
 
@@ -235,7 +280,7 @@ function NomenclaturesContent() {
     const sb = createSupabaseClient()
     const { error } = await sb
       .from('nomenclatures')
-      .update({ quantite: parseInt(editQuantite, 10) || 1 })
+      .update({ quantite: parseDecimal(editQuantite, 1), section: editSection.trim() || null })
       .eq('id', editRow.id)
     if (error) {
       toast.error(error.message)
@@ -380,9 +425,9 @@ function NomenclaturesContent() {
     toast.success(`Produit "${data.nom}" créé`)
     setCreateProductOpen(false)
 
-    // If it's a composant, select it in the add dialog
+    // If it's a composant, pre-select it in the add dialog
     if (newProduct.statut === 'Composant') {
-      setAddComposantId(data.id)
+      setAddSelected((prev) => ({ ...prev, [data.id]: '1' }))
     }
 
     loadData()
@@ -413,7 +458,7 @@ function NomenclaturesContent() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => { setAddOpen(true); setAddSearch(''); setAddComposantId('') }}
+            onClick={() => { setAddOpen(true); setAddSearch(''); setAddSelected({}); setAddSection('') }}
           >
             <Plus className="h-3.5 w-3.5 mr-1.5" />
             Ajouter composant
@@ -451,38 +496,51 @@ function NomenclaturesContent() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {selectedLignes.map((l) => (
-                    <TableRow key={l.id}>
-                      <TableCell>
-                        <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
-                          {l.composant_nom}
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground font-mono text-xs">
-                        {l.composant_ref}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{l.quantite}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openEdit(l)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteComponent(l.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                  {sectionedLignes.map((grp) => (
+                    <Fragment key={grp.key}>
+                      {/* En-tête de section (#20) — masqué s'il n'y a qu'un seul
+                          groupe « Sans section » (BOM non organisée) */}
+                      {showSectionHeaders && (
+                        <TableRow className="bg-muted/40 hover:bg-muted/40">
+                          <TableCell colSpan={4} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {grp.label}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {grp.lignes.map((l) => (
+                        <TableRow key={l.id}>
+                          <TableCell>
+                            <button type="button" className="font-medium text-blue-700 hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailModalId(l.composant_id) }}>
+                              {l.composant_nom}
+                            </button>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground font-mono text-xs">
+                            {l.composant_ref}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{formatQty(l.quantite)}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1 justify-end">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(l)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteComponent(l.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
@@ -490,11 +548,11 @@ function NomenclaturesContent() {
           </CardContent>
         </Card>
 
-        {/* Dialog: Add component */}
+        {/* Dialog: Add component(s) — multi-sélection (#21) */}
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Ajouter un composant</DialogTitle>
+              <DialogTitle>Ajouter des composants</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-1.5">
@@ -502,7 +560,7 @@ function NomenclaturesContent() {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Rechercher..."
+                    placeholder="Rechercher... (cochez-en plusieurs)"
                     value={addSearch}
                     onChange={(e) => setAddSearch(e.target.value)}
                     className="pl-9"
@@ -527,10 +585,11 @@ function NomenclaturesContent() {
                         key={c.id}
                         type="button"
                         className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent cursor-pointer ${
-                          addComposantId === c.id ? 'bg-accent' : ''
+                          addSelected[c.id] !== undefined ? 'bg-accent' : ''
                         }`}
-                        onClick={() => setAddComposantId(c.id)}
+                        onClick={() => toggleAddSelect(c.id)}
                       >
+                        <Checkbox checked={addSelected[c.id] !== undefined} className="pointer-events-none" />
                         <span className="font-medium">{c.nom}</span>
                         <span className="text-xs text-muted-foreground font-mono">{c.reference}</span>
                       </button>
@@ -546,20 +605,54 @@ function NomenclaturesContent() {
                   </>
                 )}
               </div>
+
+              {/* Sélection : quantité par composant */}
+              {Object.keys(addSelected).length > 0 && (
+                <div className="space-y-1.5">
+                  <Label>Quantités ({Object.keys(addSelected).length} sélectionné{Object.keys(addSelected).length > 1 ? 's' : ''})</Label>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {Object.keys(addSelected).map((cid) => {
+                      const c = composants.find((x) => x.id === cid)
+                      return (
+                        <div key={cid} className="flex items-center gap-2">
+                          <span className="flex-1 text-sm truncate" title={c?.nom}>{c?.nom ?? cid}</span>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            value={addSelected[cid]}
+                            onChange={(e) => setAddSelected((prev) => ({ ...prev, [cid]: e.target.value }))}
+                            className="w-24 h-8 text-right"
+                            placeholder="Qté"
+                          />
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleAddSelect(cid)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
-                <Label>Quantité</Label>
+                <Label>Section (optionnel)</Label>
                 <Input
-                  type="number"
-                  min={1}
-                  value={addQuantite}
-                  onChange={(e) => setAddQuantite(e.target.value)}
-                  className="w-32"
+                  list="bom-sections"
+                  value={addSection}
+                  onChange={(e) => setAddSection(e.target.value)}
+                  placeholder="Ex : Boîtier externe, Batterie…"
+                  className="h-8"
                 />
+                <datalist id="bom-sections">
+                  {existingSections.map((s) => <option key={s} value={s} />)}
+                </datalist>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setAddOpen(false)}>Annuler</Button>
-              <Button onClick={handleAddComponent} disabled={!addComposantId}>Ajouter</Button>
+              <Button onClick={handleAddComponent} disabled={Object.keys(addSelected).length === 0}>
+                Ajouter{Object.keys(addSelected).length > 0 ? ` (${Object.keys(addSelected).length})` : ''}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -577,12 +670,27 @@ function NomenclaturesContent() {
               <div className="space-y-1.5">
                 <Label>Quantité</Label>
                 <Input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="decimal"
                   value={editQuantite}
                   onChange={(e) => setEditQuantite(e.target.value)}
+                  placeholder="Ex : 1,5"
                   className="w-32"
                 />
+                <p className="text-[11px] text-muted-foreground">Décimales acceptées (fil au mètre : 1,5).</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Section (optionnel)</Label>
+                <Input
+                  list="bom-sections-edit"
+                  value={editSection}
+                  onChange={(e) => setEditSection(e.target.value)}
+                  placeholder="Ex : Boîtier externe…"
+                  className="w-full"
+                />
+                <datalist id="bom-sections-edit">
+                  {existingSections.map((s) => <option key={s} value={s} />)}
+                </datalist>
               </div>
             </div>
             <DialogFooter>
