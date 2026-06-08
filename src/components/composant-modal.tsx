@@ -665,16 +665,37 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                 {!addingRef && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddingRef(true)}><Plus className="h-3 w-3 mr-1" />Ajouter</Button>}
               </div>
               {addingRef && (
-                <div className="flex items-end gap-2">
-                  <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Réf fournisseur" className="h-8" />
-                  <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Nom fournisseur" className="h-8" />
-                  <Input value={newRef.lien_url} onChange={(e) => setNewRef((r) => ({ ...r, lien_url: e.target.value }))} placeholder="Lien (https://…)" className="h-8" />
-                  <Button size="sm" className="h-8" onClick={handleAddRef}>OK</Button>
-                  <Button size="sm" variant="ghost" className="h-8" onClick={() => setAddingRef(false)}><X className="h-3 w-3" /></Button>
+                <div className="rounded-lg border p-3 space-y-2.5 bg-muted/20">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Référence fournisseur</Label>
+                      <Input value={newRef.reference} onChange={(e) => setNewRef((r) => ({ ...r, reference: e.target.value }))} placeholder="Ex : 203-3281" className="h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Nom du fournisseur</Label>
+                      <Input value={newRef.fournisseur} onChange={(e) => setNewRef((r) => ({ ...r, fournisseur: e.target.value }))} placeholder="Ex : RS Components" className="h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Lien direct</Label>
+                      <Input value={newRef.lien_url} onChange={(e) => setNewRef((r) => ({ ...r, lien_url: e.target.value }))} placeholder="https://…" className="h-8" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" className="h-8" onClick={() => setAddingRef(false)}>Annuler</Button>
+                    <Button size="sm" className="h-8" onClick={handleAddRef}>Ajouter la référence</Button>
+                  </div>
                 </div>
               )}
               {refsFournisseurs.length > 0 && (
                 <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[11px] h-7">Référence</TableHead>
+                      <TableHead className="text-[11px] h-7">Fournisseur</TableHead>
+                      <TableHead className="text-[11px] h-7">Lien</TableHead>
+                      <TableHead className="w-8"></TableHead>
+                    </TableRow>
+                  </TableHeader>
                   <TableBody>
                     {refsFournisseurs.map((r) => {
                       const lien = refLienUrl(r)
