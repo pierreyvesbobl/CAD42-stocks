@@ -30,6 +30,9 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StockBadge } from '@/components/stock-badge'
+import { PrixTrend } from '@/components/prix-trend'
+import { BomCoutBadge } from '@/components/bom-cout-badge'
+import { computeBomCost, hasPrix } from '@/lib/prix'
 import { Pencil, Trash2, ArrowLeft, Plus, X, ArrowUp, ArrowDown, Search, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
@@ -46,6 +49,7 @@ interface Produit {
   stock_actuel: number
   seuil_alerte: number
   prix_ht: number
+  prix_ht_precedent: number | null
   description: string | null
 }
 
@@ -66,6 +70,7 @@ interface BomRow {
   is_deficit: boolean
   is_alerte: boolean
   seuil_alerte: number
+  prix_ht: number | null
 }
 
 interface MouvementRow {
@@ -500,7 +505,7 @@ export default function ProduitDetailPage() {
               <div><span className="text-muted-foreground">Famille :</span> {produit.famille}</div>
               <div><span className="text-muted-foreground">Statut :</span> {produit.statut}</div>
               <div><span className="text-muted-foreground">Réf interne :</span> <span className="font-mono">{produit.reference}</span></div>
-              <div><span className="text-muted-foreground">Prix HT :</span> {produit.prix_ht} &euro;</div>
+              <div className="flex items-center gap-1"><span className="text-muted-foreground">Prix HT :</span> {produit.prix_ht} &euro; <PrixTrend actuel={produit.prix_ht} precedent={produit.prix_ht_precedent} /></div>
               <div><span className="text-muted-foreground">Seuil alerte :</span> {produit.seuil_alerte}</div>
               <div><span className="text-muted-foreground">Stock :</span> <StockBadge stockActuel={produit.stock_actuel} seuilAlerte={produit.seuil_alerte} /></div>
               {produit.description && (
@@ -521,13 +526,23 @@ export default function ProduitDetailPage() {
       {/* ═══ BOM (Produit fini only) ═══ */}
       {produit.statut === 'Produit fini' && bom.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Nomenclature (BOM pour 1 unité)</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Nomenclature (BOM pour 1 unité)</CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Coût composants</span>
+                <BomCoutBadge cost={computeBomCost(bom)} />
+              </div>
+            </div>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Composant</TableHead>
-                  <TableHead>Qté requise</TableHead>
+                  <TableHead className="text-right">Prix unit.</TableHead>
+                  <TableHead className="text-right">Qté requise</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
                   <TableHead>Stock actuel</TableHead>
                   <TableHead>Stock après</TableHead>
                 </TableRow>
@@ -536,7 +551,15 @@ export default function ProduitDetailPage() {
                 {bom.map((b) => (
                   <TableRow key={b.composant_id}>
                     <TableCell className="font-medium">{b.nom}</TableCell>
-                    <TableCell>{b.quantite_necessaire}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {hasPrix(b.prix_ht)
+                        ? `${b.prix_ht} €`
+                        : <span className="text-amber-600 font-medium" title="Prix manquant">— €</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{b.quantite_necessaire}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {hasPrix(b.prix_ht) ? `${(b.prix_ht! * b.quantite_necessaire).toFixed(2)} €` : '—'}
+                    </TableCell>
                     <TableCell>{b.stock_actuel}</TableCell>
                     <TableCell>
                       <span className={b.is_deficit ? 'text-red-600 font-bold' : b.is_alerte ? 'text-yellow-600 font-bold' : ''}>

@@ -28,6 +28,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StockBadge } from '@/components/stock-badge'
+import { PrixTrend } from '@/components/prix-trend'
 import {
   Pencil, Trash2, Plus, X, ArrowUp, ArrowDown, Search, AlertTriangle, ExternalLink, Globe,
 } from 'lucide-react'
@@ -40,6 +41,7 @@ import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/l
 interface Produit {
   id: string; reference: string; nom: string; famille: string; statut: string
   stock_actuel: number; seuil_alerte: number; prix_ht: number; description: string | null
+  prix_ht_precedent: number | null
 }
 
 interface RefFournisseur {
@@ -565,7 +567,7 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div><span className="text-muted-foreground">Famille :</span> {produit.famille}</div>
                   <div><span className="text-muted-foreground">Statut :</span> {produit.statut}</div>
-                  <div><span className="text-muted-foreground">Prix HT :</span> {produit.prix_ht} &euro;</div>
+                  <div className="flex items-center gap-1"><span className="text-muted-foreground">Prix HT :</span> {produit.prix_ht} &euro; <PrixTrend actuel={produit.prix_ht} precedent={produit.prix_ht_precedent} /></div>
                   <div><span className="text-muted-foreground">Seuil alerte :</span> {produit.seuil_alerte}</div>
                   <div><span className="text-muted-foreground">Stock :</span> <StockBadge stockActuel={produit.stock_actuel} seuilAlerte={produit.seuil_alerte} /></div>
                   {produit.description && <div className="col-span-2"><span className="text-muted-foreground">Description :</span> {produit.description}</div>}

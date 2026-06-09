@@ -37,6 +37,8 @@ import { normSearch, parseDecimal, formatQty } from '@/lib/utils'
 import { duplicateProduit } from '@/lib/duplicate-produit'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
 import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
+import { computeBomCost, hasPrix, type BomCost } from '@/lib/prix'
+import { BomCoutBadge } from '@/components/bom-cout-badge'
 
 const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
 
@@ -62,6 +64,7 @@ interface NomRow {
   composant_nom: string
   composant_ref: string
   composant_statut: string
+  composant_prix: number | null
 }
 
 interface BomGroup {
@@ -82,6 +85,8 @@ function NomenclaturesContent() {
   // Ids interdits comme composant de la BOM ouverte (le produit lui-même + ses
   // ancêtres) — les ajouter créerait un cycle. Chargé via rpc bom_invalid_components.
   const [invalidComponentIds, setInvalidComponentIds] = useState<Set<string>>(new Set())
+  // Coût composants en cascade de la BOM ouverte (resolve_bom mode doc).
+  const [bomCost, setBomCost] = useState<BomCost | null>(null)
   const [search, setSearch] = useState('')
 
   function openBom(produitId: string) {
@@ -167,7 +172,7 @@ function NomenclaturesContent() {
       })
 
     sb.from('nomenclatures')
-      .select('id, produit_assemble_id, composant_id, quantite, section, composant:composant_id(nom, reference, statut)')
+      .select('id, produit_assemble_id, composant_id, quantite, section, composant:composant_id(nom, reference, statut, prix_ht)')
       .order('created_at')
       .then(({ data }) => {
         const rows = (data ?? []).map((r: Record<string, unknown>) => ({
@@ -179,6 +184,7 @@ function NomenclaturesContent() {
           composant_nom: (r.composant as { nom: string } | null)?.nom ?? '',
           composant_ref: (r.composant as { reference: string } | null)?.reference ?? '',
           composant_statut: (r.composant as { statut: string } | null)?.statut ?? '',
+          composant_prix: (r.composant as { prix_ht: number } | null)?.prix_ht ?? null,
         }))
         setNomenclatures(rows)
       })
@@ -193,6 +199,16 @@ function NomenclaturesContent() {
     const sb = createSupabaseClient()
     sb.rpc('bom_invalid_components', { p_produit_id: selectedProduit }).then(({ data }) => {
       setInvalidComponentIds(new Set(((data ?? []) as { id: string }[]).map((r) => r.id)))
+    })
+  }, [selectedProduit, nomenclatures])
+
+  // Coût composants (cascade) de la BOM ouverte : resolve_bom en mode doc
+  // explose jusqu'aux feuilles, on somme prix_ht × quantité.
+  useEffect(() => {
+    if (!selectedProduit) { setBomCost(null); return }
+    const sb = createSupabaseClient()
+    sb.rpc('resolve_bom', { p_produit_id: selectedProduit, p_quantite: 1 }).then(({ data }) => {
+      setBomCost(computeBomCost((data ?? []) as Parameters<typeof computeBomCost>[0]))
     })
   }, [selectedProduit, nomenclatures])
 
@@ -607,9 +623,17 @@ function NomenclaturesContent() {
 
         <Card>
           <CardHeader>
-            <CardTitle>
-              {selectedLignes.length} composant{selectedLignes.length > 1 ? 's' : ''}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>
+                {selectedLignes.length} composant{selectedLignes.length > 1 ? 's' : ''}
+              </CardTitle>
+              {bomCost && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Coût composants</span>
+                  <BomCoutBadge cost={bomCost} />
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {selectedLignes.length === 0 ? (
@@ -655,6 +679,7 @@ function NomenclaturesContent() {
                       </TableHead>
                       <TableHead>Composant</TableHead>
                       <TableHead>Référence</TableHead>
+                      <TableHead className="text-right">Prix unit.</TableHead>
                       <TableHead className="text-right">Quantité</TableHead>
                       <TableHead className="w-24"></TableHead>
                     </TableRow>
@@ -666,7 +691,7 @@ function NomenclaturesContent() {
                             groupe « Sans section » (BOM non organisée) */}
                         {showSectionHeaders && (
                           <TableRow className="bg-muted/40 hover:bg-muted/40">
-                            <TableCell colSpan={5} className="py-1.5">
+                            <TableCell colSpan={6} className="py-1.5">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{grp.label}</span>
                                 {grp.key !== '__no_section__' && (
@@ -704,6 +729,11 @@ function NomenclaturesContent() {
                             </TableCell>
                             <TableCell className="text-muted-foreground font-mono text-xs">
                               {l.composant_ref}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {hasPrix(l.composant_prix)
+                                ? `${l.composant_prix} €`
+                                : <span className="text-amber-600 font-medium" title="Prix manquant">— €</span>}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">{formatQty(l.quantite)}</TableCell>
                             <TableCell>
