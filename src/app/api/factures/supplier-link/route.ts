@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { findSupplierLink } from '@/lib/factures/supplier-link'
+import { extractProductImage } from '@/lib/factures/product-image'
 import { createSupabaseAdmin } from '@/lib/supabase/server'
 
 export const maxDuration = 30
@@ -35,6 +36,16 @@ export async function POST(req: NextRequest) {
       .update({ lien_url: match.url, lien_verifie_le: new Date().toISOString() })
       .eq('produit_id', body.produit_id)
       .eq('reference', body.reference)
+
+    // Au passage, on tente de remplir la miniature produit depuis cette page
+    // (best-effort : un échec n'empêche pas le lien d'être enregistré).
+    const image_url = await extractProductImage(match.url).catch(() => null)
+    if (image_url) {
+      await sb
+        .from('produits')
+        .update({ image_url, image_maj_le: new Date().toISOString() })
+        .eq('id', body.produit_id)
+    }
   }
 
   return NextResponse.json({ match, persisted: persistable })

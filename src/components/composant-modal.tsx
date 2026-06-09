@@ -31,6 +31,7 @@ import { StockBadge } from '@/components/stock-badge'
 import { PrixTrend } from '@/components/prix-trend'
 import {
   Pencil, Trash2, Plus, X, ArrowUp, ArrowDown, Search, AlertTriangle, ExternalLink, Globe,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { normSearch } from '@/lib/utils'
@@ -42,6 +43,7 @@ interface Produit {
   id: string; reference: string; nom: string; famille: string; statut: string
   stock_actuel: number; seuil_alerte: number; prix_ht: number; description: string | null
   prix_ht_precedent: number | null
+  image_url: string | null
 }
 
 interface RefFournisseur {
@@ -278,6 +280,42 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     setRefsFournisseurs((prev) => [...prev, data as RefFournisseur])
     setNewRef({ reference: '', fournisseur: '', lien_url: '' })
     setAddingRef(false)
+    // Génère la miniature si un lien produit a été fourni et qu'il n'y en a pas déjà.
+    const effectiveLink = asUrl(lien)
+    if (effectiveLink && !produit.image_url) genProductImage(effectiveLink, true)
+  }
+
+  // ─── Miniature produit (image auto depuis un lien fournisseur) ───
+
+  async function genProductImage(url: string, silent = false) {
+    if (!produit) return
+    const tid = silent ? undefined : toast.loading('Génération de la miniature...')
+    try {
+      const res = await fetch('/api/factures/product-image', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ produit_id: produit.id, url }),
+      })
+      const data = await res.json()
+      if (tid) toast.dismiss(tid)
+      if (!res.ok) { if (!silent) toast.error(data.error ?? 'Échec'); return }
+      if (!data.image_url) { if (!silent) toast.info('Aucune image trouvée sur cette page'); return }
+      setProduit((p) => (p ? { ...p, image_url: data.image_url } : p))
+      setDirty(true)
+      if (!silent) toast.success('Miniature ajoutée')
+    } catch (e) {
+      if (tid) toast.dismiss(tid)
+      if (!silent) toast.error((e as Error).message)
+    }
+  }
+
+  async function removeProductImage() {
+    if (!produit) return
+    const sb = createSupabaseClient()
+    const { error } = await sb.from('produits').update({ image_url: null }).eq('id', produit.id)
+    if (error) { toast.error(error.message); return }
+    setProduit((p) => (p ? { ...p, image_url: null } : p))
+    setDirty(true)
   }
 
   async function handleDeleteRef(refId: string) {
@@ -301,6 +339,9 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
     setRefsFournisseurs((prev) => prev.map((r) => r.id === refId ? { ...r, lien_url: v || null } : r))
     setEditingLienId(null)
     setEditingLienValue('')
+    // Tente de remplir la miniature depuis ce lien si le produit n'en a pas encore.
+    const effectiveLink = asUrl(v)
+    if (effectiveLink && !produit?.image_url) genProductImage(effectiveLink, true)
   }
 
   // Lookup automatique du lien fournisseur (#4) : Amazon en priorité, fallback
@@ -512,11 +553,38 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
       <Dialog open={open && !nestedId} onOpenChange={(o) => { if (!o) handleClose() }}>
         <DialogContent className="sm:max-w-4xl w-[min(96vw,64rem)] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <div className="flex items-center gap-2">
-              <DialogTitle>{produit.nom}</DialogTitle>
-              {isObsolete && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[11px]">obsolète</Badge>}
+            <div className="flex items-start gap-3">
+              {produit.image_url && (
+                <div className="group relative shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={produit.image_url}
+                    alt={produit.nom}
+                    width={64}
+                    height={64}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="h-16 w-16 rounded-md border object-contain bg-white"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={removeProductImage}
+                    title="Retirer l'image"
+                    className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-destructive group-hover:flex"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <DialogTitle>{produit.nom}</DialogTitle>
+                  {isObsolete && <Badge className="bg-gray-200 text-gray-700 border-gray-300 text-[11px]">obsolète</Badge>}
+                </div>
+                <p className="text-sm text-muted-foreground font-mono">{produit.reference}</p>
+              </div>
             </div>
-            <p className="text-sm text-muted-foreground font-mono">{produit.reference}</p>
           </DialogHeader>
 
           <div className="space-y-6 py-2">
@@ -734,6 +802,9 @@ export function ComposantModal({ composantId, open, onClose, onChanged }: Compos
                               </a>
                               <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => startEditLien(r)} title="Modifier le lien">
                                 <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => genProductImage(lien!)} title="Générer la miniature depuis ce lien">
+                                <ImageIcon className="h-3 w-3" />
                               </Button>
                             </div>
                           ) : (
