@@ -22,7 +22,7 @@ import { Package, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getDefaultSeuilAlerte } from '@/lib/app-settings'
 
-const STATUTS = ['Composant', 'Produit fini', 'Location']
+const STATUTS = ['Composant', 'Produit fini']
 
 interface ProduitCreateDialogProps {
   open: boolean

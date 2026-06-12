@@ -49,7 +49,7 @@ interface LigneInventaire {
 
 const FAMILLES_DEFAULT = ['Toutes', 'RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
 const FILTRES_ECART = ['Tous', 'Avec écart', 'Vérifiés', 'Non vérifiés']
-const STATUTS_FILTRE = ['Tous', 'Composant', 'Produit fini', 'Location', 'Obsolète']
+const STATUTS_FILTRE = ['Tous', 'Composant', 'Produit fini', 'Obsolète']
 
 export default function InventairePage() {
   const [lignes, setLignes] = useState<LigneInventaire[]>([])

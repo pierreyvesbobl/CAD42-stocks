@@ -20,12 +20,16 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  Truck,
+  Send,
 } from 'lucide-react'
 
 interface KPIs {
   sousSeuilRefs: number
   sousSeuilQty: number
   enAttente: number
+  parcNeuf: number
+  parcEnLocation: number
 }
 
 interface AlerteRow {
@@ -56,6 +60,22 @@ const KPI_CONFIG = [
     color: 'text-amber-600',
     href: null,
   },
+  {
+    key: 'parcNeuf' as const,
+    title: 'Unités neuves (parc)',
+    subtitle: 'disponibles à la location',
+    icon: Truck,
+    color: 'text-[#7a9e2a]',
+    href: '/location',
+  },
+  {
+    key: 'parcEnLocation' as const,
+    title: 'En location',
+    subtitle: 'unités dehors',
+    icon: Send,
+    color: 'text-blue-600',
+    href: '/location',
+  },
 ]
 
 const ALERTES_PREVIEW = 10
@@ -70,7 +90,7 @@ export default function DashboardPage() {
     const sb = createSupabaseClient()
 
     async function load() {
-      const [seuilRes, attenteRes, alerteRes, allBas] =
+      const [seuilRes, attenteRes, alerteRes, allBas, parcRes] =
         await Promise.all([
           sb.from('v_stock_bas').select('id', { count: 'exact', head: true }),
           sb
@@ -82,15 +102,25 @@ export default function DashboardPage() {
             .select('*')
             .order('marge', { ascending: true }),
           sb.from('v_stock_bas').select('marge'),
+          sb
+            .from('produits')
+            .select('stock_loc_neuf, stock_loc_en_location')
+            .eq('statut', 'Produit fini'),
         ])
 
       const cumulMarge = ((allBas.data as { marge: number }[] | null) ?? [])
         .reduce((acc, r) => acc + Math.max(0, -r.marge), 0)
 
+      const parc = (parcRes.data as { stock_loc_neuf: number; stock_loc_en_location: number }[] | null) ?? []
+      const parcNeuf = parc.reduce((acc, r) => acc + (r.stock_loc_neuf ?? 0), 0)
+      const parcEnLocation = parc.reduce((acc, r) => acc + (r.stock_loc_en_location ?? 0), 0)
+
       setKpis({
         sousSeuilRefs: seuilRes.count ?? 0,
         sousSeuilQty: cumulMarge,
         enAttente: attenteRes.count ?? 0,
+        parcNeuf,
+        parcEnLocation,
       })
       setAlertes((alerteRes.data as AlerteRow[]) ?? [])
     }

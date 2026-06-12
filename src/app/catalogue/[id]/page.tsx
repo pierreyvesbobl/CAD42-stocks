@@ -38,7 +38,7 @@ import { toast } from 'sonner'
 import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/lib/delete-produit'
 
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
-const STATUTS = ['Composant', 'Produit fini', 'Location', 'Obsolète']
+const STATUTS = ['Composant', 'Produit fini', 'Obsolète']
 
 interface Produit {
   id: string

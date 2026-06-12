@@ -74,7 +74,7 @@ interface BomImpact {
 interface ComposantOption { id: string; reference: string; nom: string; statut: string }
 
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
-const STATUTS = ['Composant', 'Produit fini', 'Location', 'Obsolète']
+const STATUTS = ['Composant', 'Produit fini', 'Obsolète']
 
 // ─── Lien fournisseur effectif ───
 // Faute de champ dédié, les URLs fournisseur sont souvent collées dans les

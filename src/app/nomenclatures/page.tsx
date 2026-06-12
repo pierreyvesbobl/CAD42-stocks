@@ -40,7 +40,7 @@ import { getDeleteImpact, deleteProduitWithDetach, type DeleteImpact } from '@/l
 import { computeBomCost, hasPrix, type BomCost } from '@/lib/prix'
 import { BomCoutBadge } from '@/components/bom-cout-badge'
 
-const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
+const STATUTS_PRODUIT = ['Composant', 'Produit fini']
 
 interface ProduitFini {
   id: string

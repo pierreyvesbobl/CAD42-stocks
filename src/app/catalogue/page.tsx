@@ -33,7 +33,7 @@ interface Produit {
   prix_ht: number
 }
 
-const STATUTS = ['Tous', 'Composant', 'Produit fini', 'Location', 'Obsolète']
+const STATUTS = ['Tous', 'Composant', 'Produit fini', 'Obsolète']
 
 export default function CataloguePage() {
   const router = useRouter()

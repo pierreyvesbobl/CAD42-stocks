@@ -84,7 +84,7 @@ interface FactureRejetee {
 }
 
 const FAMILLES_DEFAULT = ['RTK', 'Kit', 'Gateway', 'Accessoire', 'Autre']
-const STATUTS_PRODUIT = ['Composant', 'Produit fini', 'Location']
+const STATUTS_PRODUIT = ['Composant', 'Produit fini']
 
 // ─── Page ───
 

@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   ClipboardList,
   Layers,
+  Truck,
   Settings,
   LogOut,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: '/produits-finis', label: 'Produits finis', icon: BoxIcon },
   { href: '/nomenclatures', label: 'Nomenclatures', icon: Layers },
   { href: '/fabrication', label: 'Fabrication', icon: Factory },
+  { href: '/location', label: 'Location', icon: Truck },
   { href: '/mouvements', label: 'Mouvements', icon: ArrowLeftRight },
   { href: '/inventaire', label: 'Inventaire', icon: ClipboardList },
   { href: '/parametres', label: 'Paramètres', icon: Settings },
